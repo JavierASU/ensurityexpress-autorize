@@ -1831,19 +1831,34 @@ app.get("/pay-direct", async (req, res) => {
       ? amountParam
       : "20.80";
 
-    const customerName = nameParam || "Cliente Web";
-    const customerEmail = "webpayment@ensurityexpress.com"; // correo genérico, no se usa para el cliente
-    const entityId = referenceParam || "WEB_PAYMENT";
-    const entityType = "web";
+    const customerName  = nameParam || "Cliente Web";
+    const customerEmail = "webpayment@ensurityexpress.com"; // correo genérico
+    const entityId      = referenceParam || "WEB_PAYMENT";
+    const entityType    = "web";
 
     console.log("🔄 Creando HPP directo para:", {
       amount,
       customerName,
+      customerEmail,
       entityId,
       entityType
     });
 
-    // Generar Hosted Payment Page directamente
+    // Creamos un token interno para seguir rastreando esta sesión si hace falta
+    const token = generateSecureToken();
+    const tokenData = {
+      entityId,
+      entityType,
+      contactEmail: customerEmail,
+      contactName: customerName,
+      dealAmount: amount,
+      timestamp: Date.now(),
+      expires: Date.now() + 24 * 60 * 60 * 1000,
+      flowType: "web_direct"
+    };
+    paymentTokens.set(token, tokenData);
+
+    // Generar Hosted Payment Page en Authorize.Net
     const hppResult = await authorizeService.createHostedPaymentPage({
       amount,
       customerName,
@@ -1852,11 +1867,24 @@ app.get("/pay-direct", async (req, res) => {
       entityType
     });
 
-    if (!hppResult.success) {
-      throw new Error(hppResult.error || "No se pudo generar HPP");
+    if (!hppResult || !hppResult.success) {
+      console.error("❌ Error HPP (estructura inesperada):", hppResult);
+      throw new Error(hppResult?.error || "No se pudo generar la página de pago");
     }
 
-    // Responder con un formulario POST que se auto-envía a Authorize.Net
+    // Guardar referencia de Authorize.Net en el token
+    tokenData.authorizeReferenceId = hppResult.referenceId;
+    tokenData.authorizeToken = hppResult.token;
+    tokenData.finalAmount = amount;
+    paymentTokens.set(token, tokenData);
+
+    console.log("✅ HPP generado correctamente:", {
+      postUrl: hppResult.postUrl,
+      referenceId: hppResult.referenceId,
+      amount
+    });
+
+    // Página mínima que hace POST automático a Authorize.Net
     res.send(`
 <!DOCTYPE html>
 <html>
@@ -1909,8 +1937,15 @@ app.get("/pay-direct", async (req, res) => {
 </html>
     `);
   } catch (error) {
-    console.error("❌ Error en /pay-direct:", error);
-    res.status(500).send("Error al iniciar el pago. Intenta nuevamente más tarde.");
+    console.error("💥 Error en /pay-direct:", {
+      message: error.message,
+      responseStatus: error.response?.status,
+      responseData: error.response?.data
+    });
+
+    res
+      .status(500)
+      .send("Error al iniciar el pago. Intenta nuevamente más tarde.");
   }
 });
 
