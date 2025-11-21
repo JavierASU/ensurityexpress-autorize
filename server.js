@@ -457,7 +457,7 @@ function generateSecureToken() {
 }
 
 // ================================
-// FUNCIONES DE EMAIL - MODIFICADAS CON MONTO FIJO
+// FUNCIONES DE EMAIL - MODIFICADA PARA LINK DIRECTO A AUTHORIZE.NET
 // ================================
 async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount = null) {
   try {
@@ -474,6 +474,15 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
     } else if (!dealAmount) {
       dealAmount = "20.80"; // Valor por defecto
     }
+
+    // Generar directamente el link de Authorize.Net para este email
+    const hppResult = await authorizeService.createHostedPaymentPage({
+      amount: dealAmount,
+      customerName: clientName,
+      customerEmail: email,
+      entityId: dealId,
+      entityType: 'deal'
+    });
 
     const mailOptions = {
       from: `"EG Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
@@ -509,8 +518,8 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
         </div>
 
         <div style="text-align: center; margin: 30px 0;">
-            <a href="${paymentLink}" class="payment-link" target="_blank">
-                🚀 Acceder al Portal de Pagos Authorize.Net
+            <a href="${BASE_URL}/payment/direct/${hppResult.token}" class="payment-link" target="_blank">
+                🚀 Pagar Ahora con Authorize.Net
             </a>
         </div>
 
@@ -518,7 +527,8 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
         <ul>
             <li>Este link es válido por 24 horas</li>
             <li>El monto de $${dealAmount} USD está predefinido para esta transacción</li>
-            <li>Es seguro y está protegido con encriptación</li>
+            <li>Serás redirigido directamente a la página segura de Authorize.Net</li>
+            <li>Es seguro y está protegido con encriptación SSL</li>
             <li>No compartas este link con otras personas</li>
         </ul>
 
@@ -535,7 +545,26 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email enviado a: ${email} con monto fijo: $${dealAmount}`);
+    console.log(`✅ Email enviado a: ${email} con link directo a Authorize.Net - Monto: $${dealAmount}`);
+    
+    // Guardar referencia para tracking
+    const tokenData = {
+      entityId: dealId,
+      entityType: 'deal',
+      contactEmail: email,
+      contactName: clientName,
+      dealAmount: dealAmount,
+      authorizeReferenceId: hppResult.referenceId,
+      authorizeToken: hppResult.token,
+      postUrl: hppResult.postUrl,
+      timestamp: Date.now(),
+      expires: Date.now() + (24 * 60 * 60 * 1000),
+      flowType: 'email_direct' // Nuevo tipo de flujo
+    };
+    
+    // Guardar con el token de authorize como referencia
+    paymentTokens.set(hppResult.token, tokenData);
+    
     return info;
   } catch (error) {
     console.error('❌ Error enviando email:', error);
@@ -783,11 +812,11 @@ app.post("/widget/bitrix24", async (req, res) => {
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generar Link de Pago Authorize.Net
+                🎯 Generar Link de Pago (Monto Modificable)
             </button>
 
             <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
-                📧 Enviar Link por Email (Monto Fijo)
+                📧 Enviar Link por Email (Pago Directo)
             </button>
 
             <button class="btn btn-secondary" onclick="testConnection()">
@@ -883,7 +912,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                         '<strong>🆔 Referencia:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
                         '</div>' +
                         '<div style="margin-top: 15px; padding: 10px; background: #d4edda; border-radius: 5px; font-size: 12px; color: #155724;">' +
-                        '💡 El cliente recibió el link de pago por email con el monto predefinido de $' + DEAL_AMOUNT + ' USD.' +
+                        '💡 El cliente recibió un link que lo llevará DIRECTAMENTE a Authorize.Net para completar el pago de $' + DEAL_AMOUNT + ' USD.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -1032,7 +1061,132 @@ app.post("/webhook/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// RUTA DE PAGO CON TOKEN - MODIFICADA PARA DIFERENCIAR FLUJOS
+// RUTA PARA MANEJAR REDIRECCIÓN DIRECTA DESDE EMAIL
+// =====================================
+app.get("/payment/direct/:token", async (req, res) => {
+  const { token } = req.params;
+
+  console.log(`🔗 Redirección directa desde email con token: ${token.substring(0, 10)}...`);
+
+  try {
+    const tokenData = paymentTokens.get(token);
+
+    if (!tokenData) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Link Inválido - EG Express</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
+                .error-icon { font-size: 64px; color: #af100a; margin-bottom: 20px; }
+                h1 { color: #af100a; margin-bottom: 15px; }
+                p { color: #6c757d; margin-bottom: 20px; line-height: 1.6; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="error-icon">❌</div>
+                <h1>Link Inválido o Expirado</h1>
+                <p>Este link de pago ha expirado o es inválido.</p>
+                <p>Por favor solicita un nuevo link de pago al agente.</p>
+            </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Verificar expiración
+    if (Date.now() > tokenData.expires) {
+      paymentTokens.delete(token);
+      console.log('⏰ Token expirado');
+      return res.status(410).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Link Expirado - EG Express</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
+                .error-icon { font-size: 64px; color: #ffc107; margin-bottom: 20px; }
+                h1 { color: #856404; margin-bottom: 15px; }
+                p { color: #6c757d; margin-bottom: 20px; line-height: 1.6; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="error-icon">⏰</div>
+                <h1>Link Expirado</h1>
+                <p>Este link de pago ha expirado.</p>
+                <p>Por favor solicita un nuevo link al agente.</p>
+            </div>
+        </body>
+        </html>
+      `);
+    }
+
+    console.log(`✅ Redirigiendo directamente a Authorize.Net para: ${tokenData.contactName}`);
+
+    // Redirigir directamente a Authorize.Net
+    const autoSubmitForm = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirigiendo a Authorize.Net...</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 0; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        .container { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
+        .loading { display: inline-block; width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #af100a; border-radius: 50%; animation: spin 1s linear infinite; margin: 20px 0; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .info { background: #ffeaea; padding: 15px; border-radius: 8px; margin: 20px 0; border: 1px solid #ffcdd2; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="color: #af100a;">🔗 Redirigiendo a Authorize.Net</h1>
+        <p>Por favor espera, serás redirigido a la página segura de pago...</p>
+        
+        <div class="loading"></div>
+        
+        <div class="info">
+            <p><strong>Cliente:</strong> ${tokenData.contactName}</p>
+            <p><strong>Monto:</strong> $${tokenData.dealAmount} USD</p>
+            <p><strong>Referencia:</strong> ${tokenData.entityType}-${tokenData.entityId}</p>
+        </div>
+        
+        <p>Si la redirección no funciona, <a href="#" onclick="document.getElementById('authorizeForm').submit(); return false;">haz clic aquí</a>.</p>
+    </div>
+
+    <form id="authorizeForm" method="POST" action="${tokenData.postUrl}" style="display: none;">
+        <input type="hidden" name="token" value="${token}">
+    </form>
+
+    <script>
+        // Enviar formulario automáticamente después de 2 segundos
+        setTimeout(() => {
+            document.getElementById('authorizeForm').submit();
+        }, 2000);
+    </script>
+</body>
+</html>
+    `;
+
+    res.send(autoSubmitForm);
+
+  } catch (error) {
+    console.error('❌ Error en redirección directa:', error);
+    res.status(500).send(`
+      <div style="padding: 40px; text-align: center;">
+        <h2 style="color: #af100a;">Error del Servidor</h2>
+        <p>No se pudo redirigir a la página de pago. Por favor intenta nuevamente.</p>
+      </div>
+    `);
+  }
+});
+
+// =====================================
+// RUTA DE PAGO CON TOKEN - PARA LINK DIRECTO (Monto Modificable)
 // =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
@@ -1099,12 +1253,7 @@ app.get("/payment/:token", async (req, res) => {
 
     console.log(`✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail}) - Flujo: ${tokenData.flowType}`);
 
-    // Determinar si es flujo de email (monto fijo) o link directo (monto modificable)
-    const isEmailFlow = tokenData.flowType === 'email';
-    const defaultAmount = tokenData.dealAmount || "20.80";
-    const allowAmountModification = !isEmailFlow;
-
-    // FORMULARIO DE PAGO PROPIO CON AUTHORIZE.NET HPP
+    // FORMULARIO DE PAGO PROPIO CON AUTHORIZE.NET HPP (SOLO PARA LINK DIRECTO)
     const paymentForm = `
 <!DOCTYPE html>
 <html>
@@ -1145,9 +1294,6 @@ app.get("/payment/:token", async (req, res) => {
         .form-group input:focus {
             outline: none; border-color: #af100a; box-shadow: 0 0 0 3px rgba(175, 16, 10, 0.1);
         }
-        .form-group input:disabled {
-            background-color: #f8f9fa; color: #6c757d; cursor: not-allowed;
-        }
         .btn-pay {
             background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%);
             color: white; border: none; padding: 15px 25px; border-radius: 8px;
@@ -1164,10 +1310,6 @@ app.get("/payment/:token", async (req, res) => {
         .security-notice {
             background: #ffeaea; padding: 15px; border-radius: 8px; margin-top: 20px;
             text-align: center; font-size: 14px; color: #af100a; border: 1px solid #ffcdd2;
-        }
-        .fixed-amount-notice {
-            background: #e7f3ff; padding: 15px; border-radius: 8px; margin-top: 10px;
-            text-align: center; font-size: 14px; color: #0066cc; border: 1px solid #b3d9ff;
         }
         .loading { 
             display: inline-block; width: 20px; height: 20px; 
@@ -1199,7 +1341,7 @@ app.get("/payment/:token", async (req, res) => {
 
         <div class="payment-content">
             <div class="flow-indicator">
-                ${allowAmountModification ? '🔗 LINK DIRECTO - Monto Modificable' : '📧 EMAIL - Monto Fijo'}
+                🔗 LINK DIRECTO - Monto Modificable
             </div>
 
             <div class="client-summary">
@@ -1207,7 +1349,7 @@ app.get("/payment/:token", async (req, res) => {
                 <p><strong>👤 Cliente:</strong> ${tokenData.contactName}</p>
                 <p><strong>📧 Email:</strong> ${tokenData.contactEmail}</p>
                 <p><strong>🆔 Referencia:</strong> ${(tokenData.entityType || 'DEAL').toUpperCase()}-${tokenData.entityId}</p>
-                <p><strong>💰 Monto ${allowAmountModification ? 'Sugerido' : 'Fijo'}:</strong> $${defaultAmount} USD</p>
+                <p><strong>💰 Monto Sugerido:</strong> $${tokenData.dealAmount || '20.80'} USD</p>
                 <p><strong>🏦 Entorno:</strong> ${authorizeService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
             </div>
 
@@ -1216,18 +1358,11 @@ app.get("/payment/:token", async (req, res) => {
                     <label for="amount">💵 Monto a Pagar (USD)</label>
                     <input type="number" id="amount" name="amount" 
                            placeholder="0.00" min="1" step="0.01" 
-                           value="${defaultAmount}" 
-                           ${allowAmountModification ? '' : 'disabled'}
+                           value="${tokenData.dealAmount || '20.80'}" 
                            required>
-                    ${!allowAmountModification ? `
-                    <div class="fixed-amount-notice">
-                        🔒 <strong>Monto predefinido:</strong> Este pago tiene un monto fijo de $${defaultAmount} USD establecido por el agente.
-                    </div>
-                    ` : `
                     <div style="font-size: 12px; color: #6c757d; margin-top: 5px;">
                         💡 Puedes modificar el monto según sea necesario
                     </div>
-                    `}
                 </div>
 
                 <button type="submit" class="btn-pay" id="submitBtn">
@@ -1248,7 +1383,6 @@ app.get("/payment/:token", async (req, res) => {
     <script>
         const TOKEN = '${token}';
         const SERVER_URL = '${BASE_URL}';
-        const ALLOW_AMOUNT_MODIFICATION = ${allowAmountModification};
 
         // Manejar envío del formulario
         document.getElementById('paymentForm').addEventListener('submit', async function(e) {
@@ -1334,7 +1468,7 @@ app.get("/payment/:token", async (req, res) => {
         // Datos de prueba para desarrollo
         if (window.location.hostname === 'localhost' || window.location.hostname.includes('ngrok')) {
             console.log('Modo desarrollo activado');
-            console.log('Flujo:', ALLOW_AMOUNT_MODIFICATION ? 'Monto modificable' : 'Monto fijo');
+            console.log('Flujo: Monto modificable');
         }
     </script>
 </body>
@@ -1355,10 +1489,10 @@ app.get("/payment/:token", async (req, res) => {
 });
 
 // =====================================
-// API PARA ENVIAR EMAIL CON LINK DE PAGO - MODIFICADA PARA MONTO FIJO
+// API PARA ENVIAR EMAIL CON LINK DIRECTO A AUTHORIZE.NET
 // =====================================
 app.post("/api/send-payment-email", async (req, res) => {
-  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON MONTO FIJO");
+  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON LINK DIRECTO");
 
   try {
     const { entityId, entityType, clientEmail, clientName, amount } = req.body;
@@ -1382,34 +1516,17 @@ app.post("/api/send-payment-email", async (req, res) => {
       }
     }
 
-    // Generar token para el email CON FLUJO DE EMAIL (monto fijo)
-    const token = generateSecureToken();
-    const tokenData = {
-      entityId,
-      entityType,
-      contactEmail: clientEmail,
-      contactName: clientName,
-      dealAmount: dealAmount, // Guardar el monto fijo
-      timestamp: Date.now(),
-      expires: Date.now() + (24 * 60 * 60 * 1000),
-      flowType: 'email' // Marcar como flujo de email (monto fijo)
-    };
-
-    paymentTokens.set(token, tokenData);
-
-    const paymentLink = `${BASE_URL}/payment/${token}`;
-
-    // Enviar email con monto fijo
-    await sendPaymentEmail(clientEmail, clientName, paymentLink, entityId, dealAmount);
+    // Enviar email con link directo a Authorize.Net
+    await sendPaymentEmail(clientEmail, clientName, "", entityId, dealAmount);
 
     res.json({
       success: true,
-      message: "Email enviado exitosamente con monto fijo",
+      message: "Email enviado exitosamente con link directo a Authorize.Net",
       clientEmail: clientEmail,
       clientName: clientName,
       entityId: entityId,
       amount: dealAmount,
-      flowType: 'email'
+      flowType: 'email_direct'
     });
 
   } catch (error) {
@@ -1914,6 +2031,7 @@ app.get("/health", (req, res) => {
       webhook: "POST /webhook/bitrix24", 
       health: "GET /health",
       payment: "GET /payment/:token",
+      paymentDirect: "GET /payment/direct/:token",
       paymentSuccess: "GET /payment-success",
       sendEmail: "POST /api/send-payment-email",
       processPayment: "POST /api/process-payment",
@@ -2066,6 +2184,7 @@ app.get("/", (req, res) => {
       health: "/health",
       widget: "/widget/bitrix24",
       payment: "/payment/{token}",
+      paymentDirect: "/payment/direct/{token}",
       debugHpp: "/api/debug-hpp-production",
       documentation: "Ver /health para todos los endpoints"
     }
@@ -2093,7 +2212,8 @@ app.listen(PORT, () => {
   console.log(`🔗 URL Base: ${BASE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
-  console.log(`💳 Pagos: GET ${BASE_URL}/payment/{token}`);
+  console.log(`💳 Pagos (Monto Modificable): GET ${BASE_URL}/payment/{token}`);
+  console.log(`📧 Pagos Directos (Desde Email): GET ${BASE_URL}/payment/direct/{token}`);
   console.log(`✅ Éxito: GET ${BASE_URL}/payment-success`);
   console.log(`📧 Email: POST ${BASE_URL}/api/send-payment-email`);
   console.log(`💳 Procesar: POST ${BASE_URL}/api/process-payment`);
