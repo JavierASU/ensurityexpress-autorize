@@ -23,6 +23,7 @@ app.use(cors({
     "https://ensurityexpress.com",
     "https://www.ensurityexpress.com",
     "https://ensurityexpress.bitrix24.com",
+    "https://kqgavtfrpt.us-east-1.awsapprunner.com",
     NGROK_URL
   ],
   methods: ["GET", "POST", "PUT", "OPTIONS"],
