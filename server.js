@@ -1813,6 +1813,108 @@ app.post("/authorize/return", async (req, res) => {
   }
 });
 
+
+// =====================================
+// PAGO DIRECTO DESDE WEB (SIN EMAIL / SIN PÁGINA INTERMEDIA)
+// =====================================
+app.get("/pay-direct", async (req, res) => {
+  console.log("💳 PAGO DIRECTO /pay-direct");
+
+  try {
+    // Parámetros opcionales desde la URL
+    const amountParam = req.query.amount;
+    const nameParam = req.query.name;
+    const referenceParam = req.query.reference;
+
+    // Monto por defecto si no mandas nada
+    const amount = amountParam && parseFloat(amountParam) > 0
+      ? amountParam
+      : "20.80";
+
+    const customerName = nameParam || "Cliente Web";
+    const customerEmail = "webpayment@ensurityexpress.com"; // correo genérico, no se usa para el cliente
+    const entityId = referenceParam || "WEB_PAYMENT";
+    const entityType = "web";
+
+    console.log("🔄 Creando HPP directo para:", {
+      amount,
+      customerName,
+      entityId,
+      entityType
+    });
+
+    // Generar Hosted Payment Page directamente
+    const hppResult = await authorizeService.createHostedPaymentPage({
+      amount,
+      customerName,
+      customerEmail,
+      entityId,
+      entityType
+    });
+
+    if (!hppResult.success) {
+      throw new Error(hppResult.error || "No se pudo generar HPP");
+    }
+
+    // Responder con un formulario POST que se auto-envía a Authorize.Net
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Redirigiendo al Pago Seguro...</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .box {
+      text-align: center;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #af100a;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="loader"></div>
+    <p>Redirigiendo a la plataforma de pago segura...</p>
+    <form id="payForm" method="POST" action="${hppResult.postUrl}">
+      <input type="hidden" name="token" value="${hppResult.token}" />
+      <noscript>
+        <button type="submit">Ir al Pago Seguro</button>
+      </noscript>
+    </form>
+  </div>
+  <script>
+    document.getElementById('payForm').submit();
+  </script>
+</body>
+</html>
+    `);
+  } catch (error) {
+    console.error("❌ Error en /pay-direct:", error);
+    res.status(500).send("Error al iniciar el pago. Intenta nuevamente más tarde.");
+  }
+});
+
+
 // =====================================
 // RUTA DE ÉXITO DE PAGO
 // =====================================
