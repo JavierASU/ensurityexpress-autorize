@@ -37,7 +37,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan("combined"));
 
 // =========================
-// CONFIG SMTP (desde .env)
+// CONFIG SMTP (desde .env) - CORREGIDO: createTransport
 // =========================
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "mail.ensurityexpress.com",
@@ -66,24 +66,28 @@ const paymentTokens = new Map();
 const clientDataStore = new Map();
 
 // =====================================
-// CLASE SPIN SERVICE (AuthKey/Token desde .env)
+// CLASE AUTHORIZE.NET SERVICE - CORREGIDO CON POST
 // =====================================
-class SpinService {
+class AuthorizeNetService {
   constructor() {
-    this.sandboxUrl = "https://test.spinpos.net/spin";
-    this.productionUrl = "https://api.spinpos.net";
+    this.sandboxUrl = "https://apitest.authorize.net";
+    this.productionUrl = "https://api.authorize.net";
+    
+    // Credenciales desde .env
+    this.apiLoginId = process.env.AUTHORIZE_API_LOGIN_ID;
+    this.transactionKey = process.env.AUTHORIZE_TRANSACTION_KEY;
+    this.useSandbox = (process.env.AUTHORIZE_USE_SANDBOX || "false") === "true";
 
-    // Variables desde .env
-    this.tpn = process.env.SPIN_TPN || "245225937276";
-    this.authToken = process.env.SPIN_AUTH_TOKEN || "";
-    this.authKey = process.env.SPIN_AUTH_KEY || "";
-    this.useSandbox = (process.env.SPIN_USE_SANDBOX || "true") === "true";
-
-    console.log("ℹ️  SPIN config:", {
-      sandbox: this.useSandbox,
-      tpn: this.tpn,
-      hasAuthKey: !!this.authKey,
-      hasAuthToken: !!this.authToken
+    // ✅ DEBUG CRÍTICO MEJORADO
+    console.log('🚨 VERIFICACIÓN AUTHORIZE.NET CONFIGURACIÓN:', {
+      environment: this.useSandbox ? 'SANDBOX' : 'PRODUCCIÓN',
+      apiLoginId: this.apiLoginId ? `PRESENTE (${this.apiLoginId.substring(0, 4)}...)` : 'FALTANTE',
+      transactionKey: this.transactionKey ? 'PRESENTE' : 'FALTANTE',
+      baseUrl: this.getBaseUrl(),
+      tokenBaseUrl: this.useSandbox ? 
+        'https://test.authorize.net' : 
+        'https://accept.authorize.net',
+      baseUrl: BASE_URL
     });
   }
 
@@ -91,116 +95,258 @@ class SpinService {
     return this.useSandbox ? this.sandboxUrl : this.productionUrl;
   }
 
-  getHeaders() {
-    const headers = { "Content-Type": "application/json" };
-    if (this.authToken) {
-      headers["Authorization"] = `Bearer ${this.authToken}`;
-    }
-    return headers;
-  }
-
   generateReferenceId() {
-    return `EG${Date.now()}${Math.random().toString(36).substr(2, 6)}`;
+    return `AUTH${Date.now()}${Math.random().toString(36).substr(2, 6)}`;
   }
 
-  // PROCESS SALE: usa Token (cardToken) si existe; si no, cae a AuthKey
-  async processSale(paymentData) {
+  // Crear transacción de pago
+  async createTransaction(amount, paymentData) {
     try {
-      console.log('🔄 Procesando venta con Spin...');
-
-      if (!paymentData.cardToken && !this.authKey) {
-        throw new Error("Falta SPIN_AUTH_KEY o cardToken. No se puede procesar la venta.");
-      }
+      console.log('🔄 Creando transacción en Authorize.Net...');
 
       const payload = {
-        Amount: parseFloat(paymentData.amount),
-        PaymentType: "Credit",
-        ReferenceId: this.generateReferenceId(),
-        PrintReceipt: "No",
-        GetReceipt: "No",
-        InvoiceNumber: `INV-${paymentData.entityId}-${Date.now()}`,
-        CaptureSignature: false,
-        GetExtendedData: true,
-        IsReadyForIS: false,
-        CallbackInfo: {
-          Url: ""
-        },
-        Tpn: this.tpn
+        createTransactionRequest: {
+          merchantAuthentication: {
+            name: this.apiLoginId,
+            transactionKey: this.transactionKey
+          },
+          transactionRequest: {
+            transactionType: "authCaptureTransaction",
+            amount: amount.toString(),
+            payment: {
+              creditCard: {
+                cardNumber: paymentData.cardNumber,
+                expirationDate: paymentData.expiry,
+                cardCode: paymentData.cvv
+              }
+            },
+            order: {
+              invoiceNumber: `INV-${paymentData.entityId}-${Date.now()}`,
+              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`
+            },
+            customer: {
+              email: paymentData.customerEmail
+            },
+            billTo: {
+              firstName: paymentData.customerName.split(' ')[0],
+              lastName: paymentData.customerName.split(' ').slice(1).join(' ') || 'Customer',
+              email: paymentData.customerEmail
+            },
+            userFields: {
+              userField: [
+                {
+                  name: "entityType",
+                  value: paymentData.entityType
+                },
+                {
+                  name: "entityId", 
+                  value: paymentData.entityId
+                }
+              ]
+            }
+          }
+        }
       };
 
-      if (paymentData.cardToken) {
-        payload.Token = paymentData.cardToken;
-      } else {
-        payload.AuthKey = this.authKey;
-      }
-
-      console.log('📤 Enviando request a Spin Sale:', {
-        url: `${this.getBaseUrl()}/v2/Payment/Sale`,
-        payload: { ...payload, AuthKey: payload.AuthKey ? '***' : undefined, Token: payload.Token ? '***' : undefined }
+      console.log('📤 Enviando request a Authorize.Net:', {
+        url: `${this.getBaseUrl()}/xml/v1/request.api`,
+        payload: { ...payload, merchantAuthentication: { name: '***', transactionKey: '***' } }
       });
 
       const response = await axios.post(
-        `${this.getBaseUrl()}/v2/Payment/Sale`,
+        `${this.getBaseUrl()}/xml/v1/request.api`,
         payload,
-        { headers: this.getHeaders() }
+        { 
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000
+        }
       );
 
-      console.log('✅ Respuesta de Spin:', response.data);
+      console.log('✅ Respuesta de Authorize.Net:', response.data);
 
-      const ok = response.data?.GeneralResponse?.ResultCode === "0" &&
-                 response.data?.GeneralResponse?.StatusCode === "0000";
+      const result = response.data;
+      const transactionResponse = result.transactionResponse;
 
-      if (ok) {
+      if (transactionResponse && transactionResponse.responseCode === "1") {
         return {
           success: true,
-          transactionId: response.data.ReferenceId,
-          authCode: response.data.AuthCode,
-          referenceId: response.data.ReferenceId,
-          invoiceNumber: response.data.InvoiceNumber,
-          batchNumber: response.data.BatchNumber,
-          transactionNumber: response.data.TransactionNumber,
-          cardData: response.data.CardData,
-          amounts: response.data.Amounts,
-          fullResponse: response.data
+          transactionId: transactionResponse.transId,
+          authCode: transactionResponse.authCode,
+          referenceId: this.generateReferenceId(),
+          invoiceNumber: payload.createTransactionRequest.transactionRequest.order.invoiceNumber,
+          cardData: {
+            accountNumber: transactionResponse.accountNumber,
+            accountType: transactionResponse.accountType
+          },
+          fullResponse: result
         };
       } else {
-        throw new Error(
-          response.data.GeneralResponse?.DetailedMessage ||
-          response.data.GeneralResponse?.Message ||
-          'Transacción fallida en Spin'
-        );
+        const errorMsg = transactionResponse?.errors?.error?.[0]?.errorText || 
+                        result.messages?.message?.[0]?.text ||
+                        'Transacción fallida en Authorize.Net';
+        throw new Error(errorMsg);
       }
 
     } catch (error) {
-      console.error('❌ Error procesando venta con Spin:', {
+      console.error('❌ Error procesando transacción con Authorize.Net:', {
         status: error.response?.status,
         data: error.response?.data,
         message: error.message
       });
 
-      const errorMessage =
-        error.response?.data?.GeneralResponse?.DetailedMessage ||
-        error.response?.data?.GeneralResponse?.Message ||
-        error.response?.data?.message ||
-        `Error Spin: ${error.message}`;
+      const errorMessage = error.response?.data?.messages?.message?.[0]?.text ||
+                          error.response?.data?.transactionResponse?.errors?.error?.[0]?.errorText ||
+                          error.message;
 
       throw new Error(errorMessage);
     }
   }
 
-  // CHECK TRANSACTION STATUS
-  async getTransactionStatus(referenceId) {
+  // Crear Hosted Payment Page (HPP) - CORREGIDO PARA POST
+  async createHostedPaymentPage(paymentData) {
+    try {
+      console.log('🔄 Creando página de pago hospedada...');
+      console.log('📝 Datos de pago:', {
+        client: paymentData.customerName,
+        email: paymentData.customerEmail,
+        amount: paymentData.amount,
+        entity: `${paymentData.entityType}-${paymentData.entityId}`
+      });
+
+      const tokenPayload = {
+        getHostedPaymentPageRequest: {
+          merchantAuthentication: {
+            name: this.apiLoginId,
+            transactionKey: this.transactionKey
+          },
+          transactionRequest: {
+            transactionType: "authCaptureTransaction",
+            amount: paymentData.amount.toString(),
+            order: {
+              invoiceNumber: `INV-${paymentData.entityId}-${Date.now()}`,
+              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`
+            },
+            customer: {
+              email: paymentData.customerEmail
+            }
+          },
+          hostedPaymentSettings: {
+            setting: [
+              {
+                settingName: "hostedPaymentReturnOptions",
+                settingValue: JSON.stringify({
+                  showReceipt: true,
+                  url: `${BASE_URL}/authorize/return`,
+                  urlText: "Continue",
+                  cancelUrl: `${BASE_URL}/authorize/cancel`,
+                  cancelUrlText: "Cancel"
+                })
+              },
+              {
+                settingName: "hostedPaymentButtonOptions", 
+                settingValue: JSON.stringify({
+                  text: "Pay Now"
+                })
+              },
+              {
+                settingName: "hostedPaymentStyleOptions",
+                settingValue: JSON.stringify({
+                  bgColor: "#041539"
+                })
+              },
+              {
+                settingName: "hostedPaymentPaymentOptions",
+                settingValue: JSON.stringify({
+                  cardCodeRequired: true,
+                  showCreditCard: true
+                })
+              },
+              {
+                settingName: "hostedPaymentBillingAddressOptions",
+                settingValue: JSON.stringify({
+                  show: false,
+                  required: false
+                })
+              },
+              {
+                settingName: "hostedPaymentCustomerOptions",
+                settingValue: JSON.stringify({
+                  showEmail: false,
+                  requiredEmail: false,
+                  addPaymentProfile: false
+                })
+              }
+            ]
+          }
+        }
+      };
+
+      console.log('📤 Enviando request HPP a Authorize.Net:', {
+        url: `${this.getBaseUrl()}/xml/v1/request.api`,
+        environment: this.useSandbox ? 'SANDBOX' : 'PRODUCCIÓN'
+      });
+
+      const response = await axios.post(
+        `${this.getBaseUrl()}/xml/v1/request.api`,
+        tokenPayload,
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 30000
+        }
+      );
+
+      console.log('✅ Respuesta HPP Authorize.Net:', JSON.stringify(response.data, null, 2));
+
+      const result = response.data;
+      
+      if (result.token) {
+        // ✅ CORRECCIÓN CRÍTICA: DEVOLVER URL BASE Y TOKEN POR SEPARADO PARA POST
+        const postUrl = `${this.useSandbox ? 'https://test.authorize.net' : 'https://accept.authorize.net'}/payment/payment`;
+        
+        console.log('🔗 URL de pago (POST):', postUrl);
+        console.log('🔍 Token para POST:', result.token.substring(0, 50) + '...');
+        
+        return {
+          success: true,
+          postUrl: postUrl,
+          token: result.token,
+          referenceId: this.generateReferenceId(),
+          message: "Página de pago hospedada generada exitosamente"
+        };
+      } else {
+        const errorMsg = result.messages?.message?.[0]?.text || "Error generando página de pago";
+        console.error('❌ Error en respuesta HPP:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+    } catch (error) {
+      console.error('💥 Error creando HPP:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        url: error.config?.url
+      });
+      throw error;
+    }
+  }
+
+  // Verificar estado de transacción
+  async getTransactionStatus(transactionId) {
     try {
       const payload = {
-        ReferenceId: referenceId,
-        Tpn: this.tpn,
-        GetExtendedData: true
+        getTransactionDetailsRequest: {
+          merchantAuthentication: {
+            name: this.apiLoginId,
+            transactionKey: this.transactionKey
+          },
+          transId: transactionId
+        }
       };
 
       const response = await axios.post(
-        `${this.getBaseUrl()}/v2/Payment/Status`,
+        `${this.getBaseUrl()}/xml/v1/request.api`,
         payload,
-        { headers: this.getHeaders() }
+        { headers: { 'Content-Type': 'application/json' } }
       );
 
       return response.data;
@@ -209,185 +355,10 @@ class SpinService {
       throw error;
     }
   }
-
-  // VOID
-  async voidTransaction(referenceId) {
-    try {
-      const payload = {
-        ReferenceId: referenceId,
-        Tpn: this.tpn,
-        PrintReceipt: "No",
-        GetReceipt: "No"
-      };
-
-      const response = await axios.post(
-        `${this.getBaseUrl()}/v2/Payment/Void`,
-        payload,
-        { headers: this.getHeaders() }
-      );
-
-      return response.data;
-    } catch (error) {
-      console.error('❌ Error anulando transacción:', error.response?.data || error.message);
-      throw error;
-    }
-  }
 }
 
 // =====================================
-// CLASE HPP SERVICE (Sandbox/Producción Configurable) - CORREGIDA
-// =====================================
-class HppService {
-  constructor() {
-    this.sandboxUrl = "https://payment.ipospays.tech/api/v1/external-payment-transaction";
-    this.productionUrl = "https://payment.ipospays.com/api/v1/external-payment-transaction";
-    this.useSandbox = (process.env.SPIN_USE_SANDBOX || "true") === "true";
-    this.authToken = process.env.SPIN_AUTH_TOKEN;
-    this.tpn = process.env.SPIN_TPN;
-    
-    console.log("ℹ️  HPP config:", {
-      sandbox: this.useSandbox,
-      environment: this.useSandbox ? "SANDBOX" : "PRODUCTION"
-    });
-  }
-
-  getBaseUrl() {
-    return this.useSandbox ? this.sandboxUrl : this.productionUrl;
-  }
-
-  generateReferenceId() {
-    return `HPP${Date.now()}${Math.random().toString(36).substr(2, 6)}`;
-  }
-
-  async createPaymentLink(paymentData) {
-    try {
-      console.log('🔄 Creando link de pago HPP...');
-
-      const payload = {
-        merchantAuthentication: {
-          merchantId: this.tpn,
-          transactionReferenceId: this.generateReferenceId()
-        },
-        transactionRequest: {
-          transactionType: 1, // 1 = SALE
-          amount: Math.round(parseFloat(paymentData.amount) * 100).toString(),
-          calculateFee: false,
-          tipsInputPrompt: false,
-          calculateTax: false,
-          txReferenceTag1: {
-            tagLabel: "Referencia",
-            tagValue: `${paymentData.entityType}-${paymentData.entityId}`,
-            isTagMandate: false
-          },
-          txReferenceTag2: {
-            tagLabel: "Cliente",
-            tagValue: paymentData.customerName.substring(0, 25), // Limitar a 25 caracteres
-            isTagMandate: false
-          }
-        },
-        notificationOption: {
-          notifyBySMS: false,
-          mobileNumber: "",
-          notifyByPOST: true,
-          authHeader: "Bearer " + this.authToken,
-          postAPI: `${BASE_URL}/ipospays/notify`,
-          notifyByRedirect: true,
-          returnUrl: `${BASE_URL}/payment-success?amount=${paymentData.amount}&reference=${paymentData.entityType}-${paymentData.entityId}`,
-          failureUrl: `${BASE_URL}/payment-failed`,
-          cancelUrl: `${BASE_URL}/payment-cancelled`,
-          expiry: 1 // 1 día de expiración
-        },
-        preferences: {
-          integrationType: 1, // E-Commerce portal
-          avsVerification: false,
-          eReceipt: true,
-          eReceiptInputPrompt: false,
-          customerName: paymentData.customerName.substring(0, 25), // Limitar a 25 caracteres
-          customerEmail: paymentData.customerEmail,
-          customerMobile: "",
-          requestCardToken: true,
-          shortenURL: false,
-          sendPaymentLink: false,
-          integrationVersion: "v2" // Agregar versión v2
-        },
-        personalization: {
-          merchantName: "EG Express Payments",
-          logoUrl: "",
-          themeColor: "#041539",
-          description: "Pago seguro procesado por EG Express",
-          payNowButtonText: "Pagar Ahora",
-          buttonColor: "#28a745",
-          cancelButtonText: "Cancelar",
-        }
-      };
-
-      console.log('📤 Enviando request a HPP:', {
-        url: this.getBaseUrl(),
-        payload: { 
-          ...payload, 
-          merchantAuthentication: { ...payload.merchantAuthentication },
-          transactionRequest: {
-            ...payload.transactionRequest,
-            amount: payload.transactionRequest.amount + ' (' + paymentData.amount + ' USD)'
-          }
-        }
-      });
-
-      const response = await axios.post(
-        this.getBaseUrl(),
-        payload,
-        {
-          headers: {
-            'token': this.authToken,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000 // 30 segundos timeout
-        }
-      );
-
-      console.log('✅ Respuesta de HPP:', response.data);
-
-      if (response.data.information) {
-        return {
-          success: true,
-          paymentUrl: response.data.information,
-          referenceId: payload.merchantAuthentication.transactionReferenceId,
-          message: "Link de pago HPP generado exitosamente"
-        };
-      } else {
-        // Mostrar errores específicos del HPP
-        const errorDetails = response.data.errors ? 
-          response.data.errors.map(err => `${err.field}: ${err.message}`).join(', ') : 
-          "Error desconocido del HPP";
-        throw new Error(errorDetails);
-      }
-
-    } catch (error) {
-      console.error('❌ Error creando link HPP:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
-
-      // Extraer mensajes de error específicos
-      let errorMessage = "Error generando link HPP";
-      
-      if (error.response?.data?.errors) {
-        const errors = error.response.data.errors;
-        errorMessage = errors.map(err => `${err.field}: ${err.message}`).join(', ');
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      throw new Error(errorMessage);
-    }
-  }
-}
-
-// =====================================
-// CLASE Bitrix24 (lee URL desde .env)
+// CLASE Bitrix24
 // =====================================
 class Bitrix24 {
   constructor() {
@@ -474,8 +445,7 @@ class Bitrix24 {
 }
 
 // Inicializar servicios
-const spinService = new SpinService();
-const hppService = new HppService();
+const authorizeService = new AuthorizeNetService();
 const bitrix24 = new Bitrix24();
 
 // Generar token seguro
@@ -484,7 +454,7 @@ function generateSecureToken() {
 }
 
 // ================================
-// EMAILS
+// FUNCIONES DE EMAIL
 // ================================
 async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
   try {
@@ -519,7 +489,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
 
         <div style="text-align: center; margin: 30px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
-                🚀 Acceder al Portal de Pagos
+                🚀 Acceder al Portal de Pagos Authorize.Net
             </a>
         </div>
 
@@ -578,7 +548,7 @@ async function sendPaymentConfirmation(email, paymentData) {
 
     <div class="content">
         <h2>Hola ${paymentData.clientName},</h2>
-        <p>Tu pago ha sido procesado exitosamente a través de Spin Payments.</p>
+        <p>Tu pago ha sido procesado exitosamente a través de Authorize.Net.</p>
 
         <div class="receipt">
             <h3>📋 Comprobante de Pago</h3>
@@ -586,7 +556,7 @@ async function sendPaymentConfirmation(email, paymentData) {
             <p><strong>ID de Transacción:</strong> ${paymentData.transactionId}</p>
             <p><strong>Código de Autorización:</strong> ${paymentData.authCode || 'N/A'}</p>
             <p><strong>Referencia:</strong> ${paymentData.referenceId || paymentData.transactionId}</p>
-            <p><strong>Procesador:</strong> Spin Payments</p>
+            <p><strong>Procesador:</strong> Authorize.Net</p>
             <p><strong>Fecha:</strong> ${new Date().toLocaleDateString()}</p>
             <p><strong>Hora:</strong> ${new Date().toLocaleTimeString()}</p>
         </div>
@@ -660,56 +630,54 @@ app.post("/widget/bitrix24", async (req, res) => {
 
     if (!hasValidContact) {
       widgetHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>EG Express Payments</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .widget-container { width: 100%; max-width: 500px; background: white; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: linear-gradient(135deg, #041539 0%, #1a365d 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #ff9900; }
-        .header h2 { margin: 0; font-size: 24px; font-weight: 600; }
-        .error-content { padding: 40px 25px; text-align: center; }
-        .error-icon { font-size: 64px; margin-bottom: 20px; }
-        .error-title { color: #dc3545; font-size: 24px; margin-bottom: 15px; font-weight: 600; }
-        .error-message { color: #6c757d; margin-bottom: 25px; line-height: 1.6; }
-        .deal-info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: left; }
-        .btn-secondary { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: all 0.3s ease; display: inline-flex; align-items: center; gap: 10px; }
-        .btn-secondary:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(108,117,125,0.3); }
-    </style>
-</head>
-<body>
-    <div class="widget-container">
-        <div class="header">
-            <h2>💰 EG Express Payments</h2>
-            <p>Sistema de Pagos Integrado</p>
-        </div>
-
-        <div class="error-content">
-            <div class="error-icon">❌</div>
-            <div class="error-title">Contacto No Encontrado</div>
-            <div class="error-message">
-                No se puede generar un link de pago para este deal porque <strong>no tiene un contacto asociado</strong>.
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>EG Express Payments</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+                .widget-container { width: 100%; max-width: 500px; background: white; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; }
+                .header { background: linear-gradient(135deg, #041539 0%, #1a365d 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #ff9900; }
+                .content { padding: 25px; text-align: center; }
+                .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+                .btn { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; font-size: 16px; font-weight: 600; }
+            </style>
+        </head>
+        <body>
+            <div class="widget-container">
+                <div class="header">
+                    <h2>💰 EG Express Payments</h2>
+                    <p>Sistema de Pagos con Authorize.Net</p>
+                </div>
+                <div class="content">
+                    <div class="warning">
+                        <h3>⚠️ Información Requerida</h3>
+                        <p>Este ${entityType} no tiene un contacto asociado válido.</p>
+                        <p>Por favor asigna un contacto al ${entityType} para generar links de pago.</p>
+                    </div>
+                    <button class="btn" onclick="testConnection()">
+                        🔗 Probar Conexión
+                    </button>
+                    <div id="result" style="margin-top: 20px;"></div>
+                </div>
             </div>
-
-            <div class="deal-info">
-                <strong>Información del Deal:</strong><br>
-                • ID: ${entityId}<br>
-                • Tipo: ${entityType}
-            </div>
-
-            <div class="error-message">
-                <strong>📋 Para solucionar esto:</strong><br>
-                1. Asocia un contacto a este deal<br>
-                2. Asegúrate de que el contacto tenga un email válido<br>
-                3. Vuelve a intentar generar el link de pago
-            </div>
-        </div>
-    </div>
-</body>
-</html>
+            <script>
+                async function testConnection() {
+                    const resultDiv = document.getElementById('result');
+                    resultDiv.innerHTML = '<div style="text-align: center;">⏳ Probando conexión...</div>';
+                    try {
+                        const response = await fetch('${BASE_URL}/health');
+                        const result = await response.json();
+                        resultDiv.innerHTML = '<div style="color: #28a745;">✅ Conexión exitosa con el servidor</div>';
+                    } catch (error) {
+                        resultDiv.innerHTML = '<div style="color: #dc3545;">❌ Error de conexión</div>';
+                    }
+                }
+            </script>
+        </body>
+        </html>
       `;
     } else {
       const clientEmail = contactData?.EMAIL?.[0]?.VALUE || "No disponible";
@@ -753,7 +721,7 @@ app.post("/widget/bitrix24", async (req, res) => {
     <div class="widget-container">
         <div class="header">
             <h2>💰 EG Express Payments</h2>
-            <p>Sistema de Pagos Integrado</p>
+            <p>Sistema de Pagos con Authorize.Net</p>
         </div>
 
         <div class="content">
@@ -778,7 +746,7 @@ app.post("/widget/bitrix24", async (req, res) => {
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generar Link de Pago
+                🎯 Generar Link de Pago Authorize.Net
             </button>
 
             <button class="btn btn-secondary" onclick="sendPaymentEmailToClient()">
@@ -898,10 +866,9 @@ app.post("/widget/bitrix24", async (req, res) => {
                     '<div style="text-align: left;">' +
                     '<div><strong>Servidor:</strong> ' + result.server + '</div>' +
                     '<div><strong>URL:</strong> ' + SERVER_URL + '</div>' +
-                    '<div><strong>Spin:</strong> ' + (result.spin?.environment || 'No configurado') + '</div>' +
-                    '<div><strong>HPP:</strong> ' + (result.hpp?.environment || 'No configurado') + '</div>' +
+                    '<div><strong>Authorize.Net:</strong> ' + (result.authorize?.environment || 'No configurado') + '</div>' +
                     '</div>';
-                resultDiv.className = 'result success';
+                    resultDiv.className = 'result success';
             } catch (error) {
                 resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error de conexión</strong><br>' + error.message + '</div>';
                 resultDiv.className = 'result error';
@@ -1017,7 +984,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// RUTA DE PAGO CON TOKEN - FORMULARIO PROPIO CON HPP
+// RUTA DE PAGO CON TOKEN - FORMULARIO PROPIO CON AUTHORIZE.NET HPP
 // =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
@@ -1084,7 +1051,7 @@ app.get("/payment/:token", async (req, res) => {
 
     console.log(`✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail})`);
 
-    // FORMULARIO DE PAGO PROPIO CON HPP
+    // FORMULARIO DE PAGO PROPIO CON AUTHORIZE.NET HPP
     const paymentForm = `
 <!DOCTYPE html>
 <html>
@@ -1163,7 +1130,7 @@ app.get("/payment/:token", async (req, res) => {
     <div class="payment-container">
         <div class="payment-header">
             <h1>💳 Portal de Pagos Seguro</h1>
-            <p>EG Express - Procesado con Spin Payments</p>
+            <p>EG Express - Procesado con Authorize.Net</p>
         </div>
 
         <div class="payment-content">
@@ -1172,7 +1139,7 @@ app.get("/payment/:token", async (req, res) => {
                 <p><strong>👤 Cliente:</strong> ${tokenData.contactName}</p>
                 <p><strong>📧 Email:</strong> ${tokenData.contactEmail}</p>
                 <p><strong>🆔 Referencia:</strong> ${(tokenData.entityType || 'DEAL').toUpperCase()}-${tokenData.entityId}</p>
-                <p><strong>🏦 Entorno:</strong> ${hppService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
+                <p><strong>🏦 Entorno:</strong> ${authorizeService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
             </div>
 
             <form id="paymentForm">
@@ -1184,7 +1151,7 @@ app.get("/payment/:token", async (req, res) => {
                 </div>
 
                 <button type="submit" class="btn-pay" id="submitBtn">
-                    <span id="btnText">🚀 Generar Link de Pago Seguro</span>
+                    <span id="btnText">🚀 Generar Link de Pago Authorize.Net</span>
                     <div id="btnLoading" class="loading" style="display: none;"></div>
                 </button>
             </form>
@@ -1192,7 +1159,7 @@ app.get("/payment/:token", async (req, res) => {
             <div id="resultMessage" class="result-message"></div>
 
             <div class="security-notice">
-                🔒 Serás redirigido a una página de pago segura de Spin Payments. 
+                🔒 Serás redirigido a una página de pago segura de Authorize.Net. 
                 Tus datos están protegidos con encriptación SSL.
             </div>
         </div>
@@ -1221,9 +1188,9 @@ app.get("/payment/:token", async (req, res) => {
             const amount = document.getElementById('amount').value;
 
             try {
-                console.log('Generando link de pago HPP...');
+                console.log('Generando link de pago Authorize.Net...');
 
-                const response = await fetch(SERVER_URL + '/api/generate-hpp-link', {
+                const response = await fetch(SERVER_URL + '/api/generate-authorize-link', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1237,17 +1204,31 @@ app.get("/payment/:token", async (req, res) => {
                 const result = await response.json();
 
                 if (result.success) {
-                    // Mostrar éxito y redirigir
+                    // ✅ CORRECCIÓN: Crear formulario POST automático para Authorize.Net
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = result.postUrl;
+                    form.style.display = 'none';
+
+                    const tokenInput = document.createElement('input');
+                    tokenInput.type = 'hidden';
+                    tokenInput.name = 'token';
+                    tokenInput.value = result.token;
+
+                    form.appendChild(tokenInput);
+                    document.body.appendChild(form);
+
+                    // Mostrar éxito y enviar formulario
                     resultMessage.innerHTML = 
                         '✅ <strong>¡Link Generado!</strong><br>' +
-                        'Redirigiendo a página de pago segura...';
+                        'Redirigiendo a página de pago segura de Authorize.Net...';
                     resultMessage.className = 'result-message success';
                     resultMessage.style.display = 'block';
 
-                    // Redirigir después de 2 segundos
+                    // Enviar formulario automáticamente
                     setTimeout(() => {
-                        window.location.href = result.paymentUrl;
-                    }, 2000);
+                        form.submit();
+                    }, 1500);
 
                 } else {
                     throw new Error(result.error || 'Error generando link de pago');
@@ -1292,10 +1273,10 @@ app.get("/payment/:token", async (req, res) => {
 });
 
 // =====================================
-// API PARA GENERAR LINK HPP - ACTUALIZADO
+// API PARA GENERAR LINK AUTHORIZE.NET HPP - CORREGIDO CON POST
 // =====================================
-app.post("/api/generate-hpp-link", async (req, res) => {
-  console.log("🔗 SOLICITUD DE GENERACIÓN HPP");
+app.post("/api/generate-authorize-link", async (req, res) => {
+  console.log("🔗 SOLICITUD DE GENERACIÓN AUTHORIZE.NET HPP");
 
   try {
     const { token, amount } = req.body;
@@ -1324,15 +1305,15 @@ app.post("/api/generate-hpp-link", async (req, res) => {
       });
     }
 
-    console.log('🔄 Generando link HPP para:', {
+    console.log('🔄 Generando link Authorize.Net para:', {
       client: tokenData.contactName,
       email: tokenData.contactEmail,
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`
     });
 
-    // Generar link HPP
-    const hppResult = await hppService.createPaymentLink({
+    // Generar link HPP de Authorize.Net
+    const hppResult = await authorizeService.createHostedPaymentPage({
       amount: amount,
       customerName: tokenData.contactName,
       customerEmail: tokenData.contactEmail,
@@ -1340,21 +1321,23 @@ app.post("/api/generate-hpp-link", async (req, res) => {
       entityType: tokenData.entityType
     });
 
-    // Guardar la referencia HPP en la sesión
-    tokenData.hppReferenceId = hppResult.referenceId;
+    // Guardar la referencia en la sesión
+    tokenData.authorizeReferenceId = hppResult.referenceId;
+    tokenData.authorizeToken = hppResult.token;
     paymentTokens.set(token, tokenData);
 
-    console.log(`✅ Referencia HPP guardada: ${hppResult.referenceId}`);
+    console.log(`✅ Referencia Authorize.Net guardada: ${hppResult.referenceId}`);
 
     res.json({
       success: true,
-      paymentUrl: hppResult.paymentUrl,
+      postUrl: hppResult.postUrl,
+      token: hppResult.token,
       referenceId: hppResult.referenceId,
-      message: "Link de pago HPP generado exitosamente"
+      message: "Link de pago Authorize.Net generado exitosamente"
     });
 
   } catch (error) {
-    console.error("❌ Error generando link HPP:", error.message);
+    console.error("❌ Error generando link Authorize.Net:", error.message);
     
     res.status(500).json({
       success: false,
@@ -1416,13 +1399,13 @@ app.post("/api/send-payment-email", async (req, res) => {
 });
 
 // =====================================
-// API PARA PROCESAR PAGOS CON SPIN (flujo directo)
+// API PARA PROCESAR PAGOS CON AUTHORIZE.NET (flujo directo)
 // =====================================
 app.post("/api/process-payment", async (req, res) => {
-  console.log("💳 PROCESANDO PAGO CON SPIN (INTEGRACIÓN REAL)");
+  console.log("💳 PROCESANDO PAGO CON AUTHORIZE.NET (INTEGRACIÓN REAL)");
 
   try {
-    const { token, amount, cardNumber, expiry, cvv, cardName, cardToken } = req.body;
+    const { token, amount, cardNumber, expiry, cvv, cardName } = req.body;
 
     if (!token) {
       return res.status(400).json({
@@ -1440,15 +1423,14 @@ app.post("/api/process-payment", async (req, res) => {
       });
     }
 
-    console.log('🔄 Iniciando procesamiento con Spin para:', {
+    console.log('🔄 Iniciando procesamiento con Authorize.Net para:', {
       client: tokenData.contactName,
       email: tokenData.contactEmail,
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`
     });
 
-    const spinResult = await spinService.processSale({
-      amount: amount,
+    const authResult = await authorizeService.createTransaction(amount, {
       cardNumber: cardNumber,
       expiry: expiry,
       cvv: cvv,
@@ -1456,22 +1438,21 @@ app.post("/api/process-payment", async (req, res) => {
       customerName: tokenData.contactName,
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
-      entityType: tokenData.entityType,
-      cardToken: cardToken || null
+      entityType: tokenData.entityType
     });
 
-    console.log('✅ Spin Result:', spinResult);
+    console.log('✅ Authorize.Net Result:', authResult);
 
     // Enviar email de confirmación
     await sendPaymentConfirmation(tokenData.contactEmail, {
       clientName: tokenData.contactName,
       amount: amount,
-      transactionId: spinResult.transactionId,
-      authCode: spinResult.authCode,
-      referenceId: spinResult.referenceId,
+      transactionId: authResult.transactionId,
+      authCode: authResult.authCode,
+      referenceId: authResult.referenceId,
       entityType: tokenData.entityType,
       entityId: tokenData.entityId,
-      processor: 'Spin Payments'
+      processor: 'Authorize.Net'
     });
 
     // Actualizar Bitrix24 (si falla, no bloquea la respuesta)
@@ -1480,12 +1461,11 @@ app.post("/api/process-payment", async (req, res) => {
         UF_CRM_PAYMENT_STATUS: 'completed',
         UF_CRM_PAYMENT_AMOUNT: amount,
         UF_CRM_PAYMENT_DATE: new Date().toISOString(),
-        UF_CRM_TRANSACTION_ID: spinResult.transactionId,
-        UF_CRM_AUTH_CODE: spinResult.authCode,
-        UF_CRM_REFERENCE_ID: spinResult.referenceId,
-        UF_CRM_PAYMENT_PROCESSOR: 'Spin',
-        UF_CRM_BATCH_NUMBER: spinResult.batchNumber,
-        UF_CRM_INVOICE_NUMBER: spinResult.invoiceNumber
+        UF_CRM_TRANSACTION_ID: authResult.transactionId,
+        UF_CRM_AUTH_CODE: authResult.authCode,
+        UF_CRM_REFERENCE_ID: authResult.referenceId,
+        UF_CRM_PAYMENT_PROCESSOR: 'Authorize.Net',
+        UF_CRM_INVOICE_NUMBER: authResult.invoiceNumber
       });
       console.log(`✅ Bitrix24 actualizado para deal ${tokenData.entityId}`);
     } catch (bitrixError) {
@@ -1497,153 +1477,157 @@ app.post("/api/process-payment", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Pago procesado exitosamente con Spin Payments",
-      transactionId: spinResult.transactionId,
-      authCode: spinResult.authCode,
-      referenceId: spinResult.referenceId,
+      message: "Pago procesado exitosamente con Authorize.Net",
+      transactionId: authResult.transactionId,
+      authCode: authResult.authCode,
+      referenceId: authResult.referenceId,
       amount: amount,
       clientEmail: tokenData.contactEmail,
-      spinResponse: spinResult.fullResponse
+      authResponse: authResult.fullResponse
     });
 
   } catch (error) {
-    console.error("❌ Error procesando pago con Spin:", error.message);
+    console.error("❌ Error procesando pago con Authorize.Net:", error.message);
 
     // Mantener el token para reintentos
     res.status(500).json({
       success: false,
-      error: "Error al procesar el pago con Spin",
+      error: "Error al procesar el pago con Authorize.Net",
       details: error.message
     });
   }
 });
 
 // =====================================
-// HPP: WEBHOOK de iPOSpays para recibir el Token y cerrar la venta
+// WEBHOOK SILENT POST DE AUTHORIZE.NET
 // =====================================
-app.post("/ipospays/notify", async (req, res) => {
+app.post("/api/authorize-webhook", async (req, res) => {
+  console.log("🔔 AUTHORIZE.NET SILENT POST WEBHOOK RECIBIDO");
+  console.log("Body:", req.body);
+
   try {
-    console.log("📥 HPP Notification recibida:", JSON.stringify(req.body, null, 2));
+    const { 
+      x_trans_id, 
+      x_response_code, 
+      x_response_reason_text,
+      x_amount,
+      x_invoice_num,
+      x_email 
+    } = req.body;
 
-    const payload = { ...req.body };
-    
-    // DEBUG: Mostrar todas las claves disponibles
-    console.log('🔑 Claves disponibles en el payload:', Object.keys(payload));
-    
-    const token = payload.responseCardToken;
-    const amount = payload.amount;
-    const ref = payload.transactionReferenceId;
-    const status = (payload.responseMessage || "").toString().toLowerCase();
-
-    console.log('📋 Datos HPP procesados:', {
-      hasToken: !!token,
-      token: token ? `${token.substring(0, 10)}...` : 'No disponible',
-      amount: amount,
-      reference: ref,
-      status: status,
-      responseCode: payload.responseCode,
-      responseMessage: payload.responseMessage
-    });
-
-    // Verificar si la transacción fue exitosa
-    const isSuccess = payload.responseCode === 200 || 
-                     payload.responseCode === "200" ||
-                     status.includes("success") || 
-                     status.includes("approved");
-
-    if (!isSuccess) {
-      console.warn(`⚠️ Transacción no exitosa: ${payload.responseMessage} (Código: ${payload.responseCode})`);
-      return res.status(200).json({ ok: true, note: "Transacción no exitosa" });
+    // Validar que es una transacción real
+    if (!x_trans_id) {
+      console.log("❌ Webhook sin transaction ID");
+      return res.status(400).send("Missing transaction ID");
     }
 
-    console.log('✅ Transacción HPP exitosa - Registrando pago...');
+    console.log('📋 Datos de transacción recibidos:', {
+      transactionId: x_trans_id,
+      responseCode: x_response_code,
+      reason: x_response_reason_text,
+      amount: x_amount,
+      invoice: x_invoice_num,
+      email: x_email
+    });
 
-    // Buscar la sesión de pago por referenceId
-    let session = null;
-    
-    if (ref) {
-      console.log(`🔍 Buscando sesión con referencia: ${ref}`);
-      for (const [k, v] of paymentTokens.entries()) {
-        if (v.hppReferenceId === ref) {
-          session = v;
+    // Procesar según el código de respuesta
+    if (x_response_code === '1') {
+      console.log('✅ Transacción APROBADA via webhook');
+      // Aquí actualizar Bitrix24, enviar email, etc.
+    } else {
+      console.log('❌ Transacción DECLINADA via webhook:', x_response_reason_text);
+    }
+
+    // Authorize.Net requiere una respuesta 200 OK
+    res.status(200).send("OK");
+
+  } catch (error) {
+    console.error('💥 Error procesando webhook:', error);
+    res.status(500).send("Error");
+  }
+});
+
+// =====================================
+// CALLBACKS DE AUTHORIZE.NET - MEJORADO
+// =====================================
+app.get("/authorize/return", async (req, res) => {
+  console.log("✅ Authorize.Net Return URL llamada (GET)");
+  console.log("Query params:", req.query);
+
+  const { transId, x_trans_id, amount, x_amount } = req.query;
+  const transactionId = transId || x_trans_id;
+  const transactionAmount = amount || x_amount;
+
+  try {
+    if (transactionId) {
+      console.log(`🔍 Obteniendo detalles de transacción: ${transactionId}`);
+      
+      // Verificar estado de la transacción
+      const transactionDetails = await authorizeService.getTransactionStatus(transactionId);
+      console.log("📋 Detalles de transacción:", transactionDetails);
+
+      // Buscar en paymentTokens por transactionId y actualizar Bitrix24
+      for (let [token, tokenData] of paymentTokens.entries()) {
+        if (tokenData.authorizeReferenceId && tokenData.authorizeReferenceId.includes(transactionId)) {
+          console.log(`✅ Token encontrado para transacción ${transactionId}`);
+          
+          // Actualizar Bitrix24
+          try {
+            await bitrix24.updateDeal(tokenData.entityId, {
+              UF_CRM_PAYMENT_STATUS: 'completed',
+              UF_CRM_PAYMENT_AMOUNT: transactionAmount || '1.00',
+              UF_CRM_PAYMENT_DATE: new Date().toISOString(),
+              UF_CRM_TRANSACTION_ID: transactionId,
+              UF_CRM_PAYMENT_PROCESSOR: 'Authorize.Net'
+            });
+            console.log(`✅ Bitrix24 actualizado para deal ${tokenData.entityId}`);
+          } catch (bitrixError) {
+            console.error('❌ Error actualizando Bitrix24:', bitrixError.message);
+          }
+
+          // Enviar email de confirmación
+          try {
+            await sendPaymentConfirmation(tokenData.contactEmail, {
+              clientName: tokenData.contactName,
+              amount: transactionAmount || '1.00',
+              transactionId: transactionId,
+              entityType: tokenData.entityType,
+              entityId: tokenData.entityId
+            });
+          } catch (emailError) {
+            console.error('❌ Error enviando email:', emailError.message);
+          }
+
           break;
         }
       }
     }
 
-    if (!session) {
-      console.warn("⚠️ No se pudo encontrar sesión de pago para HPP notify");
-      return res.status(200).json({ ok: true, note: "Session not found but payment successful" });
-    }
-
-    console.log(`✅ Sesión encontrada: ${session.contactName} (${session.contactEmail})`);
-
-    // Convertir amount de centavos a dólares
-    const amountInDollars = amount ? (parseFloat(amount) / 100).toString() : "0.00";
-
-    // ENVIAR EMAIL DE CONFIRMACIÓN DIRECTAMENTE (sin reprocesar con Spin)
-    await sendPaymentConfirmation(session.contactEmail, {
-      clientName: session.contactName,
-      amount: amountInDollars,
-      transactionId: payload.transactionId || ref,
-      authCode: payload.responseApprovalCode || 'HPP-APPROVED',
-      referenceId: ref,
-      entityType: session.entityType,
-      entityId: session.entityId,
-      processor: 'iPOSpays HPP'
-    });
-
-    // ACTUALIZAR BITRIX24 CON LA INFORMACIÓN DEL HPP
-    try {
-      await bitrix24.updateDeal(session.entityId, {
-        UF_CRM_PAYMENT_STATUS: 'completed',
-        UF_CRM_PAYMENT_AMOUNT: amountInDollars,
-        UF_CRM_PAYMENT_DATE: new Date().toISOString(),
-        UF_CRM_TRANSACTION_ID: payload.transactionId || ref,
-        UF_CRM_AUTH_CODE: payload.responseApprovalCode || 'HPP-APPROVED',
-        UF_CRM_REFERENCE_ID: ref,
-        UF_CRM_PAYMENT_PROCESSOR: 'iPOSpays HPP',
-        UF_CRM_BATCH_NUMBER: payload.batchNumber || '',
-        UF_CRM_INVOICE_NUMBER: payload.transactionNumber ? `HPP-${payload.transactionNumber}` : '',
-        UF_CRM_HPP_REFERENCE: ref,
-        UF_CRM_CARD_LAST4: payload.cardLast4Digit || '',
-        UF_CRM_APPROVAL_CODE: payload.responseApprovalCode || ''
-      });
-      console.log(`✅ Bitrix24 actualizado para deal ${session.entityId}`);
-    } catch (bitrixError) {
-      console.error("❌ Error actualizando Bitrix24:", bitrixError.message);
-    }
-
-    // GUARDAR EL TOKEN PARA FUTURAS TRANSACCIONES (si existe)
-    if (token) {
-      console.log(`💳 Token HPP recibido: ${token.substring(0, 10)}... (guardado para futuros pagos)`);
-      // Aquí podrías guardar el token en tu base de datos para pagos recurrentes
-    }
-
-    // LIMPIAR SESIÓN
-    for (const [k, v] of paymentTokens.entries()) {
-      if (v.hppReferenceId === ref) {
-        paymentTokens.delete(k);
-        console.log(`🗑️ Sesión limpiada para referencia: ${ref}`);
-        break;
-      }
-    }
-
-    console.log("✅ Pago HPP registrado exitosamente en el sistema");
-    res.status(200).json({ 
-      ok: true, 
-      transactionId: payload.transactionId,
-      message: "Pago registrado correctamente"
-    });
-
+    res.redirect(`${BASE_URL}/payment-success?amount=${transactionAmount || '0'}&processor=Authorize.Net&transId=${transactionId || ''}`);
   } catch (error) {
-    console.error("❌ Error en /ipospays/notify:", error);
-    // Siempre responder 200 para evitar reintentos
-    res.status(200).json({ 
-      ok: false,
-      error: error.message,
-      note: "Error procesando notificación pero pago exitoso en HPP"
-    });
+    console.error("❌ Error en return URL:", error);
+    res.redirect(`${BASE_URL}/payment-success?amount=${transactionAmount || '0'}`);
+  }
+});
+
+// Agregar también POST para relay response
+app.post("/authorize/return", async (req, res) => {
+  console.log("✅ Authorize.Net Return URL llamada (POST)");
+  console.log("Body params:", req.body);
+  
+  // Similar lógica al GET pero con req.body
+  const { x_trans_id, x_amount } = req.body;
+  
+  try {
+    if (x_trans_id) {
+      console.log(`🔍 Procesando transacción vía POST: ${x_trans_id}`);
+      // Misma lógica de actualización que en GET
+    }
+    
+    res.redirect(`${BASE_URL}/payment-success?amount=${x_amount || '0'}&processor=Authorize.Net&transId=${x_trans_id || ''}`);
+  } catch (error) {
+    console.error("❌ Error en return URL (POST):", error);
+    res.redirect(`${BASE_URL}/payment-success`);
   }
 });
 
@@ -1651,7 +1635,7 @@ app.post("/ipospays/notify", async (req, res) => {
 // RUTA DE ÉXITO DE PAGO
 // =====================================
 app.get("/payment-success", (req, res) => {
-  const { amount, reference } = req.query;
+  const { amount, reference, processor } = req.query;
 
   console.log(`✅ Mostrando página de éxito para pago: $${amount}`);
 
@@ -1697,7 +1681,7 @@ app.get("/payment-success", (req, res) => {
     <div class="container">
         <div class="success-icon">✅</div>
         <h1>¡Pago Exitoso!</h1>
-        <p>El pago ha sido procesado correctamente a través de Spin Payments.</p>
+        <p>El pago ha sido procesado correctamente a través de ${processor || 'Authorize.Net'}.</p>
         <p>Se ha enviado un comprobante a tu email con todos los detalles.</p>
 
         ${amount ? `
@@ -1705,8 +1689,8 @@ app.get("/payment-success", (req, res) => {
             <h3>📋 Resumen del Pago</h3>
             <p><strong>💰 Monto:</strong> $${amount}</p>
             ${reference ? `<p><strong>🔢 Referencia:</strong> ${reference}</p>` : ''}
-            <p><strong>🏦 Procesador:</strong> Spin Payments</p>
-            <p><strong>🏪 Entorno:</strong> ${hppService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
+            <p><strong>🏦 Procesador:</strong> ${processor || 'Authorize.Net'}</p>
+            <p><strong>🏪 Entorno:</strong> ${authorizeService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
             <p><strong>📅 Fecha:</strong> ${new Date().toLocaleDateString()}</p>
             <p><strong>⏰ Hora:</strong> ${new Date().toLocaleTimeString()}</p>
             <p><strong>🔒 Estado:</strong> Completado</p>
@@ -1725,7 +1709,7 @@ app.get("/payment-success", (req, res) => {
         <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #e9ecef;">
             <p style="font-size: 12px; color: #6c757d;">
                 <strong>EG Express Payments</strong><br>
-                Procesado por Spin POS
+                Procesado por Authorize.Net
             </p>
         </div>
     </div>
@@ -1804,20 +1788,20 @@ app.get("/payment-cancelled", (req, res) => {
 });
 
 // =====================================
-// HEALTH CHECK - CON MÁS INFO DEBUG
+// HEALTH CHECK MEJORADO
 // =====================================
 app.get("/health", (req, res) => {
   const activeSessions = Array.from(paymentTokens.entries()).map(([k, v]) => ({
     token: k.substring(0, 10) + '...',
     entity: `${v.entityType}-${v.entityId}`,
     email: v.contactEmail,
-    hppReference: v.hppReferenceId || 'No asignada',
+    authorizeReference: v.authorizeReferenceId || 'No asignada',
     expires: new Date(v.expires).toISOString()
   }));
 
   res.json({
     status: "OK",
-    server: "EG Express Payments v5.1",
+    server: "EG Express Payments con Authorize.Net v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
     endpoints: {
@@ -1828,21 +1812,16 @@ app.get("/health", (req, res) => {
       paymentSuccess: "GET /payment-success",
       sendEmail: "POST /api/send-payment-email",
       processPayment: "POST /api/process-payment",
-      generateHpp: "POST /api/generate-hpp-link",
-      hppNotify: "POST /ipospays/notify"
+      generateAuthorizeLink: "POST /api/generate-authorize-link",
+      authorizeReturn: "GET /authorize/return",
+      authorizeCancel: "GET /authorize/cancel"
     },
-    spin: {
-      environment: spinService.useSandbox ? "SANDBOX" : "PRODUCTION",
-      tpn: spinService.tpn,
-      baseUrl: spinService.getBaseUrl(),
-      hasAuthToken: !!spinService.authToken,
-      hasAuthKey: !!spinService.authKey
-    },
-    hpp: {
-      environment: hppService.useSandbox ? "SANDBOX" : "PRODUCTION", 
-      baseUrl: hppService.getBaseUrl(),
-      hasAuthToken: !!hppService.authToken,
-      tpn: hppService.tpn
+    authorize: {
+      environment: authorizeService.useSandbox ? "SANDBOX" : "PRODUCTION",
+      baseUrl: authorizeService.getBaseUrl(),
+      hasApiLoginId: !!authorizeService.apiLoginId,
+      hasTransactionKey: !!authorizeService.transactionKey,
+      apiLoginId: authorizeService.apiLoginId ? `${authorizeService.apiLoginId.substring(0, 4)}...` : 'No configurado'
     },
     sessions: {
       active: paymentTokens.size,
@@ -1853,6 +1832,70 @@ app.get("/health", (req, res) => {
       memory: process.memoryUsage()
     }
   });
+});
+
+// =====================================
+// RUTA DE DEBUG HPP PRODUCCIÓN
+// =====================================
+app.post("/api/debug-hpp-production", async (req, res) => {
+  try {
+    console.log('🧪 DEBUG HPP PRODUCCIÓN INICIADO');
+    
+    const testPayload = {
+      getHostedPaymentPageRequest: {
+        merchantAuthentication: {
+          name: process.env.AUTHORIZE_API_LOGIN_ID,
+          transactionKey: process.env.AUTHORIZE_TRANSACTION_KEY
+        },
+        transactionRequest: {
+          transactionType: "authCaptureTransaction",
+          amount: "10.00"
+        }
+      }
+    };
+
+    console.log('📤 DEBUG - Enviando a PRODUCCIÓN:', {
+      url: 'https://api.authorize.net/xml/v1/request.api',
+      payload: { ...testPayload, merchantAuthentication: { name: '***', transactionKey: '***' } }
+    });
+
+    const response = await axios.post(
+      'https://api.authorize.net/xml/v1/request.api',
+      testPayload,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000
+      }
+    );
+
+    console.log('✅ DEBUG - Respuesta PRODUCCIÓN:', JSON.stringify(response.data, null, 2));
+
+    if (response.data.token) {
+      const postUrl = 'https://accept.authorize.net/payment/payment';
+      
+      res.json({
+        success: true,
+        token: response.data.token,
+        postUrl: postUrl,
+        fullResponse: response.data
+      });
+    } else {
+      throw new Error(response.data.messages?.message?.[0]?.text || 'No token received');
+    }
+
+  } catch (error) {
+    console.error('💥 DEBUG - Error PRODUCCIÓN:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      response: error.response?.data
+    });
+  }
 });
 
 // =====================================
@@ -1910,14 +1953,15 @@ app.get("/widget/bitrix24", (req, res) => {
 // =====================================
 app.get("/", (req, res) => {
   res.json({
-    message: "EG Express Payments API",
-    version: "5.0",
+    message: "EG Express Payments API con Authorize.Net",
+    version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
     endpoints: {
       health: "/health",
       widget: "/widget/bitrix24",
       payment: "/payment/{token}",
+      debugHpp: "/api/debug-hpp-production",
       documentation: "Ver /health para todos los endpoints"
     }
   });
@@ -1940,7 +1984,7 @@ app.use((err, req, res, next) => {
 // =====================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor EG Express Payments ejecutándose en puerto ${PORT}`);
+  console.log(`🚀 Servidor EG Express Payments con Authorize.Net ejecutándose en puerto ${PORT}`);
   console.log(`🔗 URL Base: ${BASE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
@@ -1948,10 +1992,10 @@ app.listen(PORT, () => {
   console.log(`✅ Éxito: GET ${BASE_URL}/payment-success`);
   console.log(`📧 Email: POST ${BASE_URL}/api/send-payment-email`);
   console.log(`💳 Procesar: POST ${BASE_URL}/api/process-payment`);
-  console.log(`🔗 HPP Generate: POST ${BASE_URL}/api/generate-hpp-link`);
-  console.log(`📬 HPP Notify: POST ${BASE_URL}/ipospays/notify`);
+  console.log(`🔗 Authorize Generate: POST ${BASE_URL}/api/generate-authorize-link`);
+  console.log(`🔧 Debug HPP: POST ${BASE_URL}/api/debug-hpp-production`);
+  console.log(`↩️  Authorize Return: GET ${BASE_URL}/authorize/return`);
+  console.log(`❌ Authorize Cancel: GET ${BASE_URL}/authorize/cancel`);
   console.log(`❤️  Health: GET ${BASE_URL}/health`);
-  console.log(`🏦 Spin: ${spinService.useSandbox ? 'SANDBOX' : 'PRODUCTION'} - ${spinService.getBaseUrl()}`);
-  console.log(`🌐 HPP: ${hppService.useSandbox ? 'SANDBOX' : 'PRODUCTION'} - ${hppService.getBaseUrl()}`);
-  console.log(`🔧 Para cambiar URL: modifica BASE_URL en el archivo .env`);
+  console.log(`🏦 Authorize.Net: ${authorizeService.useSandbox ? 'SANDBOX' : 'PRODUCTION'} - ${authorizeService.getBaseUrl()}`);
 });
