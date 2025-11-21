@@ -13,7 +13,7 @@ const app = express();
 // =========================
 // CONFIGURACIONES DESDE .ENV
 // =========================
-const NGROK_URL = process.env.NGROK_URL || "https://8e37d90fec2a.ngrok-free.app";
+const NGROK_URL = process.env.NGROK_URL || "https://kqgavtfrpt.us-east-1.awsapprunner.com";
 
 // CORS
 app.use(cors({
