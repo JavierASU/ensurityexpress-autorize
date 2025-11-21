@@ -376,11 +376,14 @@ class Bitrix24 {
         console.log(`✅ Deal obtenido:`, {
           title: response.data.result.TITLE,
           contactId: response.data.result.CONTACT_ID,
-          stageId: response.data.result.STAGE_ID
+          stageId: response.data.result.STAGE_ID,
+          amount: response.data.result.OPPORTUNITY
         });
+        return response.data.result;
+      } else {
+        console.log('❌ Deal no encontrado');
+        return null;
       }
-
-      return response.data.result;
     } catch (error) {
       console.error('❌ Error obteniendo deal:', error.message);
       throw error;
@@ -454,10 +457,24 @@ function generateSecureToken() {
 }
 
 // ================================
-// FUNCIONES DE EMAIL
+// FUNCIONES DE EMAIL - MODIFICADAS CON MONTO FIJO
 // ================================
-async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
+async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount = null) {
   try {
+    // Obtener el monto del deal si no se proporciona
+    let dealAmount = amount;
+    if (!dealAmount && dealId) {
+      try {
+        const deal = await bitrix24.getDeal(dealId);
+        dealAmount = deal?.OPPORTUNITY || "20.80"; // Valor por defecto
+      } catch (error) {
+        console.error('Error obteniendo monto del deal:', error);
+        dealAmount = "20.80"; // Valor por defecto
+      }
+    } else if (!dealAmount) {
+      dealAmount = "20.80"; // Valor por defecto
+    }
+
     const mailOptions = {
       from: `"EG Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
       to: email,
@@ -469,10 +486,11 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
     <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #041539 0%, #1a365d 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-        .payment-link { background: #28a745; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; font-weight: bold; }
+        .header { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+        .content { background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e0e0e0; }
+        .payment-link { background: #af100a; color: white; padding: 15px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0; font-weight: bold; }
         .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
+        .amount-info { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #af100a; }
     </style>
 </head>
 <body>
@@ -485,7 +503,10 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
         <h2>Hola ${clientName},</h2>
         <p>Has recibido un link de pago seguro para completar tu transacción.</p>
 
-        <p><strong>Referencia:</strong> Deal #${dealId}</p>
+        <div class="amount-info">
+            <p><strong>Referencia:</strong> Deal #${dealId}</p>
+            <p><strong>Monto a pagar:</strong> $${dealAmount} USD</p>
+        </div>
 
         <div style="text-align: center; margin: 30px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
@@ -496,6 +517,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
         <p><strong>⚠️ Importante:</strong></p>
         <ul>
             <li>Este link es válido por 24 horas</li>
+            <li>El monto de $${dealAmount} USD está predefinido para esta transacción</li>
             <li>Es seguro y está protegido con encriptación</li>
             <li>No compartas este link con otras personas</li>
         </ul>
@@ -513,7 +535,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId) {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email enviado a: ${email}`);
+    console.log(`✅ Email enviado a: ${email} con monto fijo: $${dealAmount}`);
     return info;
   } catch (error) {
     console.error('❌ Error enviando email:', error);
@@ -534,9 +556,9 @@ async function sendPaymentConfirmation(email, paymentData) {
     <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-        .receipt { background: white; padding: 20px; border-radius: 5px; border-left: 4px solid #28a745; margin: 20px 0; }
+        .header { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+        .content { background: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e0e0e0; }
+        .receipt { background: #f8f9fa; padding: 20px; border-radius: 5px; border-left: 4px solid #af100a; margin: 20px 0; }
         .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; }
     </style>
 </head>
@@ -599,6 +621,7 @@ app.post("/widget/bitrix24", async (req, res) => {
     let entityId = null;
     let entityType = null;
     let hasValidContact = true;
+    let dealAmount = null;
 
     if (PLACEMENT_OPTIONS) {
       let options;
@@ -619,6 +642,11 @@ app.post("/widget/bitrix24", async (req, res) => {
         entityType = 'deal';
         console.log(`💼 Es un DEAL: ${entityId}`);
         contactData = await bitrix24.getContactFromDeal(entityId);
+        
+        // Obtener el monto del deal
+        const deal = await bitrix24.getDeal(entityId);
+        dealAmount = deal?.OPPORTUNITY || "20.80";
+        console.log(`💰 Monto del deal: $${dealAmount}`);
 
         if (!contactData) {
           hasValidContact = false;
@@ -639,10 +667,10 @@ app.post("/widget/bitrix24", async (req, res) => {
                 * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
                 .widget-container { width: 100%; max-width: 500px; background: white; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; }
-                .header { background: linear-gradient(135deg, #041539 0%, #1a365d 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #ff9900; }
+                .header { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #000000; }
                 .content { padding: 25px; text-align: center; }
                 .warning { background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-                .btn { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; font-size: 16px; font-weight: 600; }
+                .btn { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; font-size: 16px; font-weight: 600; }
             </style>
         </head>
         <body>
@@ -694,27 +722,28 @@ app.post("/widget/bitrix24", async (req, res) => {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
         .widget-container { width: 100%; max-width: 500px; background: white; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden; }
-        .header { background: linear-gradient(135deg, #041539 0%, #1a365d 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #ff9900; }
+        .header { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 25px; text-align: center; border-bottom: 4px solid #000000; }
         .header h2 { margin: 0; font-size: 24px; font-weight: 600; }
         .header p { margin: 5px 0 0 0; opacity: 0.9; }
         .content { padding: 25px; }
-        .client-info { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #28a745; }
-        .client-info h3 { color: #041539; margin-bottom: 15px; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+        .client-info { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #af100a; }
+        .client-info h3 { color: #af100a; margin-bottom: 15px; font-size: 18px; display: flex; align-items: center; gap: 10px; }
         .info-item { display: flex; align-items: center; margin-bottom: 8px; padding: 8px 0; }
-        .info-icon { width: 20px; text-align: center; margin-right: 10px; color: #041539; }
-        .btn { background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; font-size: 16px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 10px; }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,123,255,0.3); }
-        .btn-success { background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); }
-        .btn-success:hover { box-shadow: 0 10px 20px rgba(40,167,69,0.3); }
+        .info-icon { width: 20px; text-align: center; margin-right: 10px; color: #af100a; }
+        .btn { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 0; width: 100%; font-size: 16px; font-weight: 600; transition: all 0.3s ease; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(175, 16, 10, 0.3); }
+        .btn-success { background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%); }
+        .btn-success:hover { box-shadow: 0 10px 20px rgba(175, 16, 10, 0.3); }
         .btn-secondary { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); }
         .btn-secondary:hover { box-shadow: 0 10px 20px rgba(108,117,125,0.3); }
         .result { margin-top: 20px; padding: 20px; border-radius: 10px; background: white; border: 2px solid transparent; transition: all 0.3s ease; }
-        .success { border-color: #28a745; background: #f8fff9; }
+        .success { border-color: #af100a; background: #f8fff9; }
         .error { border-color: #dc3545; background: #fff5f5; }
         .link-display { word-break: break-all; padding: 15px; background: #e9ecef; border-radius: 8px; margin: 15px 0; font-size: 14px; border: 1px dashed #6c757d; }
-        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite; }
+        .loading { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #af100a; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .email-section { background: #e7f3ff; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #b3d9ff; }
+        .email-section { background: #ffeaea; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #ffcdd2; }
+        .amount-info { background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #af100a; }
     </style>
 </head>
 <body>
@@ -743,14 +772,22 @@ app.post("/widget/bitrix24", async (req, res) => {
                     <span class="info-icon">🆔</span>
                     <strong>ID:</strong> ${entityId} (${entityType})
                 </div>
+                ${dealAmount ? `
+                <div class="amount-info">
+                    <div class="info-item">
+                        <span class="info-icon">💰</span>
+                        <strong>Monto del Deal:</strong> $${dealAmount} USD
+                    </div>
+                </div>
+                ` : ''}
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
                 🎯 Generar Link de Pago Authorize.Net
             </button>
 
-            <button class="btn btn-secondary" onclick="sendPaymentEmailToClient()">
-                📧 Enviar Link por Email
+            <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
+                📧 Enviar Link por Email (Monto Fijo)
             </button>
 
             <button class="btn btn-secondary" onclick="testConnection()">
@@ -767,6 +804,7 @@ app.post("/widget/bitrix24", async (req, res) => {
         const CLIENT_NAME = '${clientName}';
         const ENTITY_ID = '${entityId}';
         const ENTITY_TYPE = '${entityType}';
+        const DEAL_AMOUNT = '${dealAmount || "20.80"}';
 
         async function generatePaymentLink() {
             const resultDiv = document.getElementById('result');
@@ -782,7 +820,8 @@ app.post("/widget/bitrix24", async (req, res) => {
                             ENTITY_ID: ENTITY_ID,
                             ENTITY_TYPE: ENTITY_TYPE,
                             CONTACT_EMAIL: CLIENT_EMAIL,
-                            CONTACT_NAME: CLIENT_NAME
+                            CONTACT_NAME: CLIENT_NAME,
+                            DEAL_AMOUNT: DEAL_AMOUNT
                         })
                     })
                 });
@@ -791,13 +830,16 @@ app.post("/widget/bitrix24", async (req, res) => {
 
                 if (result.success) {
                     resultDiv.innerHTML =
-                        '<div style="color: #28a745; text-align: center;">' +
+                        '<div style="color: #af100a; text-align: center;">' +
                         '✅ <strong>Link generado exitosamente!</strong></div><br>' +
                         '<strong>🔗 Enlace de Pago Seguro:</strong><br>' +
                         '<div class="link-display">' + result.paymentLink + '</div><br>' +
+                        '<div class="amount-info">' +
+                        '<strong>💡 Nota:</strong> El cliente podrá modificar el monto en el portal de pagos.' +
+                        '</div><br>' +
                         '<button class="btn btn-success" onclick="copyToClipboard(\\'' + result.paymentLink + '\\')">📋 Copiar Link</button>' +
-                        '<div style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 5px; font-size: 12px; color: #0066cc;">' +
-                        '💡 <strong>Instrucciones:</strong> Envía este link al cliente para que complete el pago de forma segura.' +
+                        '<div style="margin-top: 15px; padding: 10px; background: #ffeaea; border-radius: 5px; font-size: 12px; color: #af100a;">' +
+                        '💡 <strong>Instrucciones:</strong> Envía este link al cliente para que complete el pago. El cliente podrá modificar el monto si es necesario.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -823,7 +865,8 @@ app.post("/widget/bitrix24", async (req, res) => {
                         entityId: ENTITY_ID,
                         entityType: ENTITY_TYPE,
                         clientEmail: CLIENT_EMAIL,
-                        clientName: CLIENT_NAME
+                        clientName: CLIENT_NAME,
+                        amount: DEAL_AMOUNT
                     })
                 });
 
@@ -831,15 +874,16 @@ app.post("/widget/bitrix24", async (req, res) => {
 
                 if (result.success) {
                     resultDiv.innerHTML =
-                        '<div style="color: #28a745; text-align: center;">' +
+                        '<div style="color: #af100a; text-align: center;">' +
                         '✅ <strong>Email enviado exitosamente!</strong></div><br>' +
                         '<div class="email-section">' +
                         '<strong>📧 Destinatario:</strong> ' + CLIENT_EMAIL + '<br>' +
                         '<strong>👤 Cliente:</strong> ' + CLIENT_NAME + '<br>' +
+                        '<strong>💰 Monto Predefinido:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
                         '<strong>🆔 Referencia:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
                         '</div>' +
                         '<div style="margin-top: 15px; padding: 10px; background: #d4edda; border-radius: 5px; font-size: 12px; color: #155724;">' +
-                        '💡 El cliente recibió el link de pago por email. Puedes hacer seguimiento desde Bitrix24.' +
+                        '💡 El cliente recibió el link de pago por email con el monto predefinido de $' + DEAL_AMOUNT + ' USD.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -861,7 +905,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 const response = await fetch(SERVER_URL + '/health');
                 const result = await response.json();
                 resultDiv.innerHTML =
-                    '<div style="color: #28a745; text-align: center;">' +
+                    '<div style="color: #af100a; text-align: center;">' +
                     '✅ <strong>Conexión exitosa!</strong></div><br>' +
                     '<div style="text-align: left;">' +
                     '<div><strong>Servidor:</strong> ' + result.server + '</div>' +
@@ -900,7 +944,7 @@ app.post("/widget/bitrix24", async (req, res) => {
       <div style="padding: 20px; background: #f8d7da; color: #721c24; border-radius: 8px; text-align: center;">
         <h3>❌ Error en el Widget</h3>
         <p><strong>Detalles:</strong> ${error.message}</p>
-        <button style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;" 
+        <button style="padding: 10px 20px; background: #af100a; color: white; border: none; border-radius: 5px; cursor: pointer;" 
                 onclick="location.reload()">🔄 Reintentar</button>
       </div>
     `);
@@ -908,7 +952,7 @@ app.post("/widget/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// WEBHOOK PARA GENERAR LINKS DE PAGO
+// WEBHOOK PARA GENERAR LINKS DE PAGO - MODIFICADO PARA DIFERENCIAR FLUJOS
 // =====================================
 app.post("/webhook/bitrix24", async (req, res) => {
   console.log("🔗 WEBHOOK BITRIX24 LLAMADO");
@@ -940,6 +984,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
     const entityType = options.ENTITY_TYPE;
     const contactEmail = options.CONTACT_EMAIL;
     const contactName = options.CONTACT_NAME;
+    const dealAmount = options.DEAL_AMOUNT;
 
     if (!entityId) {
       return res.status(400).json({
@@ -955,12 +1000,14 @@ app.post("/webhook/bitrix24", async (req, res) => {
       entityType,
       contactEmail,
       contactName,
+      dealAmount: dealAmount || null, // Guardar el monto del deal si está disponible
       timestamp: Date.now(),
-      expires: Date.now() + (24 * 60 * 60 * 1000)
+      expires: Date.now() + (24 * 60 * 60 * 1000),
+      flowType: 'direct_link' // Marcar como flujo de link directo (monto modificable)
     };
 
     paymentTokens.set(token, tokenData);
-    console.log(`✅ Token generado para ${entityType} ${entityId}`);
+    console.log(`✅ Token generado para ${entityType} ${entityId} - Flujo: Link Directo`);
 
     // Generar link de pago
     const paymentLink = `${BASE_URL}/payment/${token}`;
@@ -971,7 +1018,8 @@ app.post("/webhook/bitrix24", async (req, res) => {
       entityId: entityId,
       entityType: entityType,
       contactEmail: contactEmail,
-      message: "Link de pago generado exitosamente"
+      flowType: 'direct_link',
+      message: "Link de pago generado exitosamente - Cliente puede modificar monto"
     });
 
   } catch (error) {
@@ -984,7 +1032,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// RUTA DE PAGO CON TOKEN - FORMULARIO PROPIO CON AUTHORIZE.NET HPP
+// RUTA DE PAGO CON TOKEN - MODIFICADA PARA DIFERENCIAR FLUJOS
 // =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
@@ -1003,8 +1051,8 @@ app.get("/payment/:token", async (req, res) => {
             <style>
                 body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
-                .error-icon { font-size: 64px; color: #dc3545; margin-bottom: 20px; }
-                h1 { color: #dc3545; margin-bottom: 15px; }
+                .error-icon { font-size: 64px; color: #af100a; margin-bottom: 20px; }
+                h1 { color: #af100a; margin-bottom: 15px; }
                 p { color: #6c757d; margin-bottom: 20px; line-height: 1.6; }
             </style>
         </head>
@@ -1049,7 +1097,12 @@ app.get("/payment/:token", async (req, res) => {
       `);
     }
 
-    console.log(`✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail})`);
+    console.log(`✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail}) - Flujo: ${tokenData.flowType}`);
+
+    // Determinar si es flujo de email (monto fijo) o link directo (monto modificable)
+    const isEmailFlow = tokenData.flowType === 'email';
+    const defaultAmount = tokenData.dealAmount || "20.80";
+    const allowAmountModification = !isEmailFlow;
 
     // FORMULARIO DE PAGO PROPIO CON AUTHORIZE.NET HPP
     const paymentForm = `
@@ -1071,47 +1124,54 @@ app.get("/payment/:token", async (req, res) => {
             overflow: hidden; width: 100%; max-width: 500px;
         }
         .payment-header {
-            background: linear-gradient(135deg, #041539 0%, #1a365d 100%);
-            color: white; padding: 30px; text-align: center; border-bottom: 4px solid #ff9900;
+            background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%);
+            color: white; padding: 30px; text-align: center; border-bottom: 4px solid #000000;
         }
         .payment-header h1 { margin: 0; font-size: 28px; font-weight: 600; }
         .payment-header p { margin: 10px 0 0 0; opacity: 0.9; }
         .payment-content { padding: 30px; }
         .client-summary {
             background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 25px;
-            border-left: 4px solid #28a745;
+            border-left: 4px solid #af100a;
         }
         .form-group { margin-bottom: 20px; }
         .form-group label {
-            display: block; margin-bottom: 8px; font-weight: 600; color: #041539;
+            display: block; margin-bottom: 8px; font-weight: 600; color: #af100a;
         }
         .form-group input {
             width: 100%; padding: 12px 15px; border: 2px solid #e9ecef; border-radius: 8px;
             font-size: 16px; transition: border-color 0.3s ease;
         }
         .form-group input:focus {
-            outline: none; border-color: #007bff; box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+            outline: none; border-color: #af100a; box-shadow: 0 0 0 3px rgba(175, 16, 10, 0.1);
+        }
+        .form-group input:disabled {
+            background-color: #f8f9fa; color: #6c757d; cursor: not-allowed;
         }
         .btn-pay {
-            background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+            background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%);
             color: white; border: none; padding: 15px 25px; border-radius: 8px;
             font-size: 18px; font-weight: 600; width: 100%; cursor: pointer;
             transition: all 0.3s ease; display: flex; align-items: center;
             justify-content: center; gap: 10px; margin-top: 10px;
         }
         .btn-pay:hover:not(:disabled) {
-            transform: translateY(-2px); box-shadow: 0 10px 20px rgba(40,167,69,0.3);
+            transform: translateY(-2px); box-shadow: 0 10px 20px rgba(175, 16, 10, 0.3);
         }
         .btn-pay:disabled {
             background: #6c757d; cursor: not-allowed; opacity: 0.7;
         }
         .security-notice {
-            background: #e7f3ff; padding: 15px; border-radius: 8px; margin-top: 20px;
+            background: #ffeaea; padding: 15px; border-radius: 8px; margin-top: 20px;
+            text-align: center; font-size: 14px; color: #af100a; border: 1px solid #ffcdd2;
+        }
+        .fixed-amount-notice {
+            background: #e7f3ff; padding: 15px; border-radius: 8px; margin-top: 10px;
             text-align: center; font-size: 14px; color: #0066cc; border: 1px solid #b3d9ff;
         }
         .loading { 
             display: inline-block; width: 20px; height: 20px; 
-            border: 3px solid #f3f3f3; border-top: 3px solid #007bff; 
+            border: 3px solid #f3f3f3; border-top: 3px solid #af100a; 
             border-radius: 50%; animation: spin 1s linear infinite; 
         }
         @keyframes spin { 
@@ -1124,6 +1184,10 @@ app.get("/payment/:token", async (req, res) => {
         }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .flow-indicator {
+            background: #af100a; color: white; padding: 8px 15px; border-radius: 20px;
+            font-size: 12px; font-weight: bold; display: inline-block; margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -1134,11 +1198,16 @@ app.get("/payment/:token", async (req, res) => {
         </div>
 
         <div class="payment-content">
+            <div class="flow-indicator">
+                ${allowAmountModification ? '🔗 LINK DIRECTO - Monto Modificable' : '📧 EMAIL - Monto Fijo'}
+            </div>
+
             <div class="client-summary">
-                <h3 style="margin: 0 0 15px 0; color: #041539;">Resumen del Pago</h3>
+                <h3 style="margin: 0 0 15px 0; color: #af100a;">Resumen del Pago</h3>
                 <p><strong>👤 Cliente:</strong> ${tokenData.contactName}</p>
                 <p><strong>📧 Email:</strong> ${tokenData.contactEmail}</p>
                 <p><strong>🆔 Referencia:</strong> ${(tokenData.entityType || 'DEAL').toUpperCase()}-${tokenData.entityId}</p>
+                <p><strong>💰 Monto ${allowAmountModification ? 'Sugerido' : 'Fijo'}:</strong> $${defaultAmount} USD</p>
                 <p><strong>🏦 Entorno:</strong> ${authorizeService.useSandbox ? 'SANDBOX (Pruebas)' : 'PRODUCCIÓN'}</p>
             </div>
 
@@ -1147,7 +1216,18 @@ app.get("/payment/:token", async (req, res) => {
                     <label for="amount">💵 Monto a Pagar (USD)</label>
                     <input type="number" id="amount" name="amount" 
                            placeholder="0.00" min="1" step="0.01" 
-                           value="20.80" required>
+                           value="${defaultAmount}" 
+                           ${allowAmountModification ? '' : 'disabled'}
+                           required>
+                    ${!allowAmountModification ? `
+                    <div class="fixed-amount-notice">
+                        🔒 <strong>Monto predefinido:</strong> Este pago tiene un monto fijo de $${defaultAmount} USD establecido por el agente.
+                    </div>
+                    ` : `
+                    <div style="font-size: 12px; color: #6c757d; margin-top: 5px;">
+                        💡 Puedes modificar el monto según sea necesario
+                    </div>
+                    `}
                 </div>
 
                 <button type="submit" class="btn-pay" id="submitBtn">
@@ -1168,6 +1248,7 @@ app.get("/payment/:token", async (req, res) => {
     <script>
         const TOKEN = '${token}';
         const SERVER_URL = '${BASE_URL}';
+        const ALLOW_AMOUNT_MODIFICATION = ${allowAmountModification};
 
         // Manejar envío del formulario
         document.getElementById('paymentForm').addEventListener('submit', async function(e) {
@@ -1239,7 +1320,7 @@ app.get("/payment/:token", async (req, res) => {
                 resultMessage.innerHTML = 
                     '❌ <strong>Error al Generar Link</strong><br>' +
                     error.message + '<br><br>' +
-                    '<button onclick="location.reload()" style="background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">🔄 Reintentar</button>';
+                    '<button onclick="location.reload()" style="background: #af100a; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">🔄 Reintentar</button>';
                 resultMessage.className = 'result-message error';
                 resultMessage.style.display = 'block';
             } finally {
@@ -1253,6 +1334,7 @@ app.get("/payment/:token", async (req, res) => {
         // Datos de prueba para desarrollo
         if (window.location.hostname === 'localhost' || window.location.hostname.includes('ngrok')) {
             console.log('Modo desarrollo activado');
+            console.log('Flujo:', ALLOW_AMOUNT_MODIFICATION ? 'Monto modificable' : 'Monto fijo');
         }
     </script>
 </body>
@@ -1265,10 +1347,78 @@ app.get("/payment/:token", async (req, res) => {
     console.error('❌ Error en página de pago:', error);
     res.status(500).send(`
       <div style="padding: 40px; text-align: center;">
-        <h2 style="color: #dc3545;">Error del Servidor</h2>
+        <h2 style="color: #af100a;">Error del Servidor</h2>
         <p>No se pudo cargar la página de pago. Por favor intenta nuevamente.</p>
       </div>
     `);
+  }
+});
+
+// =====================================
+// API PARA ENVIAR EMAIL CON LINK DE PAGO - MODIFICADA PARA MONTO FIJO
+// =====================================
+app.post("/api/send-payment-email", async (req, res) => {
+  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON MONTO FIJO");
+
+  try {
+    const { entityId, entityType, clientEmail, clientName, amount } = req.body;
+
+    if (!entityId || !clientEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Datos incompletos para enviar email"
+      });
+    }
+
+    // Obtener el monto del deal si no se proporciona
+    let dealAmount = amount;
+    if (!dealAmount) {
+      try {
+        const deal = await bitrix24.getDeal(entityId);
+        dealAmount = deal?.OPPORTUNITY || "20.80";
+      } catch (error) {
+        console.error('Error obteniendo monto del deal:', error);
+        dealAmount = "20.80";
+      }
+    }
+
+    // Generar token para el email CON FLUJO DE EMAIL (monto fijo)
+    const token = generateSecureToken();
+    const tokenData = {
+      entityId,
+      entityType,
+      contactEmail: clientEmail,
+      contactName: clientName,
+      dealAmount: dealAmount, // Guardar el monto fijo
+      timestamp: Date.now(),
+      expires: Date.now() + (24 * 60 * 60 * 1000),
+      flowType: 'email' // Marcar como flujo de email (monto fijo)
+    };
+
+    paymentTokens.set(token, tokenData);
+
+    const paymentLink = `${BASE_URL}/payment/${token}`;
+
+    // Enviar email con monto fijo
+    await sendPaymentEmail(clientEmail, clientName, paymentLink, entityId, dealAmount);
+
+    res.json({
+      success: true,
+      message: "Email enviado exitosamente con monto fijo",
+      clientEmail: clientEmail,
+      clientName: clientName,
+      entityId: entityId,
+      amount: dealAmount,
+      flowType: 'email'
+    });
+
+  } catch (error) {
+    console.error("❌ Error enviando email:", error);
+    res.status(500).json({
+      success: false,
+      error: "Error al enviar el email",
+      details: error.message
+    });
   }
 });
 
@@ -1309,7 +1459,8 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       client: tokenData.contactName,
       email: tokenData.contactEmail,
       amount: amount,
-      entity: `${tokenData.entityType}-${tokenData.entityId}`
+      entity: `${tokenData.entityType}-${tokenData.entityId}`,
+      flowType: tokenData.flowType
     });
 
     // Generar link HPP de Authorize.Net
@@ -1324,15 +1475,18 @@ app.post("/api/generate-authorize-link", async (req, res) => {
     // Guardar la referencia en la sesión
     tokenData.authorizeReferenceId = hppResult.referenceId;
     tokenData.authorizeToken = hppResult.token;
+    tokenData.finalAmount = amount; // Guardar el monto final usado
     paymentTokens.set(token, tokenData);
 
-    console.log(`✅ Referencia Authorize.Net guardada: ${hppResult.referenceId}`);
+    console.log(`✅ Referencia Authorize.Net guardada: ${hppResult.referenceId} - Monto: $${amount}`);
 
     res.json({
       success: true,
       postUrl: hppResult.postUrl,
       token: hppResult.token,
       referenceId: hppResult.referenceId,
+      amount: amount,
+      flowType: tokenData.flowType,
       message: "Link de pago Authorize.Net generado exitosamente"
     });
 
@@ -1342,58 +1496,6 @@ app.post("/api/generate-authorize-link", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || "Error al generar el link de pago"
-    });
-  }
-});
-
-// =====================================
-// API PARA ENVIAR EMAIL CON LINK DE PAGO
-// =====================================
-app.post("/api/send-payment-email", async (req, res) => {
-  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL");
-
-  try {
-    const { entityId, entityType, clientEmail, clientName } = req.body;
-
-    if (!entityId || !clientEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Datos incompletos para enviar email"
-      });
-    }
-
-    // Generar token para el email
-    const token = generateSecureToken();
-    const tokenData = {
-      entityId,
-      entityType,
-      contactEmail: clientEmail,
-      contactName: clientName,
-      timestamp: Date.now(),
-      expires: Date.now() + (24 * 60 * 60 * 1000)
-    };
-
-    paymentTokens.set(token, tokenData);
-
-    const paymentLink = `${BASE_URL}/payment/${token}`;
-
-    // Enviar email
-    await sendPaymentEmail(clientEmail, clientName, paymentLink, entityId);
-
-    res.json({
-      success: true,
-      message: "Email enviado exitosamente",
-      clientEmail: clientEmail,
-      clientName: clientName,
-      entityId: entityId
-    });
-
-  } catch (error) {
-    console.error("❌ Error enviando email:", error);
-    res.status(500).json({
-      success: false,
-      error: "Error al enviar el email",
-      details: error.message
     });
   }
 });
@@ -1575,10 +1677,11 @@ app.get("/authorize/return", async (req, res) => {
           try {
             await bitrix24.updateDeal(tokenData.entityId, {
               UF_CRM_PAYMENT_STATUS: 'completed',
-              UF_CRM_PAYMENT_AMOUNT: transactionAmount || '1.00',
+              UF_CRM_PAYMENT_AMOUNT: transactionAmount || tokenData.finalAmount || '1.00',
               UF_CRM_PAYMENT_DATE: new Date().toISOString(),
               UF_CRM_TRANSACTION_ID: transactionId,
-              UF_CRM_PAYMENT_PROCESSOR: 'Authorize.Net'
+              UF_CRM_PAYMENT_PROCESSOR: 'Authorize.Net',
+              UF_CRM_PAYMENT_FLOW: tokenData.flowType || 'unknown'
             });
             console.log(`✅ Bitrix24 actualizado para deal ${tokenData.entityId}`);
           } catch (bitrixError) {
@@ -1589,7 +1692,7 @@ app.get("/authorize/return", async (req, res) => {
           try {
             await sendPaymentConfirmation(tokenData.contactEmail, {
               clientName: tokenData.contactName,
-              amount: transactionAmount || '1.00',
+              amount: transactionAmount || tokenData.finalAmount || '1.00',
               transactionId: transactionId,
               entityType: tokenData.entityType,
               entityId: tokenData.entityId
@@ -1658,22 +1761,22 @@ app.get("/payment-success", (req, res) => {
             box-shadow: 0 20px 40px rgba(0,0,0,0.1); text-align: center; 
             max-width: 500px; width: 100%;
         }
-        .success-icon { font-size: 80px; color: #28a745; margin-bottom: 20px; }
-        h1 { color: #28a745; margin-bottom: 15px; font-size: 32px; }
+        .success-icon { font-size: 80px; color: #af100a; margin-bottom: 20px; }
+        h1 { color: #af100a; margin-bottom: 15px; font-size: 32px; }
         p { color: #6c757d; margin-bottom: 20px; line-height: 1.6; font-size: 16px; }
         .receipt { 
             background: #f8f9fa; padding: 25px; border-radius: 10px; 
-            margin: 25px 0; text-align: left; border-left: 4px solid #28a745;
+            margin: 25px 0; text-align: left; border-left: 4px solid #af100a;
         }
-        .receipt h3 { color: #041539; margin-bottom: 15px; }
+        .receipt h3 { color: #af100a; margin-bottom: 15px; }
         .btn-home {
-            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            background: linear-gradient(135deg, #af100a 0%, #d32f2f 100%);
             color: white; padding: 12px 25px; border: none; border-radius: 8px;
             cursor: pointer; font-size: 16px; font-weight: 600; text-decoration: none;
             display: inline-block; margin-top: 15px;
         }
         .btn-home:hover {
-            transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0,123,255,0.3);
+            transform: translateY(-2px); box-shadow: 0 10px 20px rgba(175, 16, 10, 0.3);
         }
     </style>
 </head>
@@ -1746,9 +1849,9 @@ app.get("/payment-failed", (req, res) => {
     <style>
         body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
-        .error-icon { font-size: 64px; color: #dc3545; margin-bottom: 20px; }
-        h1 { color: #dc3545; margin-bottom: 15px; }
-        .btn-retry { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; text-decoration: none; display: inline-block; margin-top: 15px; }
+        .error-icon { font-size: 64px; color: #af100a; margin-bottom: 20px; }
+        h1 { color: #af100a; margin-bottom: 15px; }
+        .btn-retry { background: #af100a; color: white; padding: 10px 20px; border: none; border-radius: 5px; text-decoration: none; display: inline-block; margin-top: 15px; }
     </style>
 </head>
 <body>
@@ -1795,6 +1898,8 @@ app.get("/health", (req, res) => {
     token: k.substring(0, 10) + '...',
     entity: `${v.entityType}-${v.entityId}`,
     email: v.contactEmail,
+    flowType: v.flowType || 'unknown',
+    amount: v.dealAmount || 'N/A',
     authorizeReference: v.authorizeReferenceId || 'No asignada',
     expires: new Date(v.expires).toISOString()
   }));
@@ -1912,7 +2017,7 @@ app.get("/widget/bitrix24", (req, res) => {
         <div style="max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
           <h1>🧪 Testing Widget Bitrix24</h1>
           <p>Testing <strong>${testEntityType}</strong> ID: <strong>${testEntityId}</strong></p>
-          <button onclick="testPost()" style="background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+          <button onclick="testPost()" style="background: #af100a; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
             Probar Widget POST
           </button>
           <div id="result" style="margin-top: 20px;"></div>
