@@ -77,6 +77,9 @@ class AuthorizeNetService {
     this.transactionKey = process.env.AUTHORIZE_TRANSACTION_KEY;
     this.useSandbox = (process.env.AUTHORIZE_USE_SANDBOX || "false") === "true";
 
+    // Límite típico de Authorize.Net para invoiceNumber
+    this.INVOICE_MAX_LEN = 20;
+
     console.log('🚨 VERIFICACIÓN AUTHORIZE.NET CONFIGURACIÓN:', {
       environment: this.useSandbox ? 'SANDBOX' : 'PRODUCCIÓN',
       apiLoginId: this.apiLoginId ? `PRESENTE (${this.apiLoginId.substring(0, 4)}...)` : 'FALTANTE',
@@ -91,6 +94,25 @@ class AuthorizeNetService {
 
   getBaseUrl() {
     return this.useSandbox ? this.sandboxUrl : this.productionUrl;
+  }
+
+  // 🔹 NUEVO: generador seguro de invoiceNumber
+  buildInvoiceNumber(entityId = 'WEB') {
+    // Quitar caracteres raros y limitar la parte del entityId
+    const cleanEntity = String(entityId)
+      .replace(/[^A-Za-z0-9]/g, '')  // solo letras y números
+      .slice(0, 8);                  // máximo 8 chars para el id
+
+    const base = `INV-${cleanEntity || 'WEB'}`; // ej: INV-PLAN995, INV-WEB
+    const shortTs = Date.now().toString().slice(-6); // últimos 6 dígitos del timestamp
+    let invoice = `${base}-${shortTs}`;              // ej: INV-PLAN995-123456
+
+    // Recorta por si acaso al tamaño máximo permitido
+    if (invoice.length > this.INVOICE_MAX_LEN) {
+      invoice = invoice.slice(0, this.INVOICE_MAX_LEN);
+    }
+
+    return invoice;
   }
 
   generateReferenceId() {
@@ -119,7 +141,8 @@ class AuthorizeNetService {
               }
             },
             order: {
-              invoiceNumber: `INV-${paymentData.entityId}-${Date.now()}`,
+              // 🔹 Usamos el generador seguro de invoiceNumber
+              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
               description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`
             },
             customer: {
@@ -148,7 +171,16 @@ class AuthorizeNetService {
 
       console.log('📤 Enviando request a Authorize.Net:', {
         url: `${this.getBaseUrl()}/xml/v1/request.api`,
-        payload: { ...payload, merchantAuthentication: { name: '***', transactionKey: '***' } }
+        payload: {
+          ...payload,
+          createTransactionRequest: {
+            ...payload.createTransactionRequest,
+            merchantAuthentication: {
+              name: '***',
+              transactionKey: '***'
+            }
+          }
+        }
       });
 
       const response = await axios.post(
@@ -180,8 +212,8 @@ class AuthorizeNetService {
         };
       } else {
         const errorMsg = transactionResponse?.errors?.error?.[0]?.errorText || 
-                        result.messages?.message?.[0]?.text ||
-                        'Transacción fallida en Authorize.Net';
+                         result.messages?.message?.[0]?.text ||
+                         'Transacción fallida en Authorize.Net';
         throw new Error(errorMsg);
       }
 
@@ -193,8 +225,8 @@ class AuthorizeNetService {
       });
 
       const errorMessage = error.response?.data?.messages?.message?.[0]?.text ||
-                          error.response?.data?.transactionResponse?.errors?.error?.[0]?.errorText ||
-                          error.message;
+                           error.response?.data?.transactionResponse?.errors?.error?.[0]?.errorText ||
+                           error.message;
 
       throw new Error(errorMessage);
     }
@@ -221,7 +253,8 @@ class AuthorizeNetService {
             transactionType: "authCaptureTransaction",
             amount: paymentData.amount.toString(),
             order: {
-              invoiceNumber: `INV-${paymentData.entityId}-${Date.now()}`,
+              // 🔹 Usamos el generador seguro de invoiceNumber
+              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
               description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`
             },
             customer: {
@@ -353,6 +386,7 @@ class AuthorizeNetService {
     }
   }
 }
+
 
 // =====================================
 // CLASE Bitrix24
