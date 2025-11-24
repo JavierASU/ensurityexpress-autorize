@@ -13,7 +13,8 @@ const app = express();
 // =========================
 // CONFIGURACIÓN DE URL DESDE .ENV
 // =========================
-const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const BASE_URL =
+  process.env.BASE_URL || "https://kqgavtfrpt.us-east-1.awsapprunner.com";
 
 console.log(`🔗 URL Base configurada: ${BASE_URL}`);
 
@@ -68,7 +69,7 @@ const paymentTokens = new Map();
 const clientDataStore = new Map();
 
 // =====================================
-// CLASE AUTHORIZE.NET SERVICE (Accept.js)
+// CLASE AUTHORIZE.NET SERVICE
 // =====================================
 class AuthorizeNetService {
   constructor() {
@@ -77,7 +78,6 @@ class AuthorizeNetService {
 
     this.apiLoginId = process.env.AUTHORIZE_API_LOGIN_ID;
     this.transactionKey = process.env.AUTHORIZE_TRANSACTION_KEY;
-    this.clientKey = process.env.AUTHORIZE_CLIENT_KEY;
     this.useSandbox = (process.env.AUTHORIZE_USE_SANDBOX || "false") === "true";
 
     // Límite típico de Authorize.Net para invoiceNumber
@@ -89,8 +89,11 @@ class AuthorizeNetService {
         ? `PRESENTE (${this.apiLoginId.substring(0, 4)}...)`
         : "FALTANTE",
       transactionKey: this.transactionKey ? "PRESENTE" : "FALTANTE",
-      clientKey: this.clientKey ? "PRESENTE" : "FALTANTE",
       baseUrl: this.getBaseUrl(),
+      tokenBaseUrl: this.useSandbox
+        ? "https://test.authorize.net"
+        : "https://accept.authorize.net",
+      baseAppUrl: BASE_URL,
     });
   }
 
@@ -98,16 +101,18 @@ class AuthorizeNetService {
     return this.useSandbox ? this.sandboxUrl : this.productionUrl;
   }
 
-  // Generador seguro de invoiceNumber
+  // 🔹 NUEVO: generador seguro de invoiceNumber
   buildInvoiceNumber(entityId = "WEB") {
+    // Quitar caracteres raros y limitar la parte del entityId
     const cleanEntity = String(entityId)
-      .replace(/[^A-Za-z0-9]/g, "")
-      .slice(0, 8);
+      .replace(/[^A-Za-z0-9]/g, "") // solo letras y números
+      .slice(0, 8); // máximo 8 chars para el id
 
-    const base = `INV-${cleanEntity || "WEB"}`;
-    const shortTs = Date.now().toString().slice(-6);
-    let invoice = `${base}-${shortTs}`;
+    const base = `INV-${cleanEntity || "WEB"}`; // ej: INV-PLAN995, INV-WEB
+    const shortTs = Date.now().toString().slice(-6); // últimos 6 dígitos del timestamp
+    let invoice = `${base}-${shortTs}`; // ej: INV-PLAN995-123456
 
+    // Recorta por si acaso al tamaño máximo permitido
     if (invoice.length > this.INVOICE_MAX_LEN) {
       invoice = invoice.slice(0, this.INVOICE_MAX_LEN);
     }
@@ -119,72 +124,10 @@ class AuthorizeNetService {
     return `AUTH${Date.now()}${Math.random().toString(36).substr(2, 6)}`;
   }
 
-  // Crear transacción usando opaqueData (Accept.js) o tarjeta directa (fallback)
+  // Crear transacción de pago
   async createTransaction(amount, paymentData) {
     try {
       console.log("🔄 Creando transacción en Authorize.Net...");
-
-      const transactionRequest = {
-        transactionType: "authCaptureTransaction",
-        amount: amount.toString(),
-        order: {
-          invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-          description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
-        },
-        customer: {
-          email: paymentData.customerEmail,
-        },
-        billTo: {
-          firstName: (paymentData.customerName || "Customer").split(" ")[0],
-          lastName:
-            (paymentData.customerName || "Customer")
-              .split(" ")
-              .slice(1)
-              .join(" ") || "Customer",
-          email: paymentData.customerEmail,
-        },
-        userFields: {
-          userField: [
-            {
-              name: "entityType",
-              value: paymentData.entityType,
-            },
-            {
-              name: "entityId",
-              value: paymentData.entityId,
-            },
-          ],
-        },
-      };
-
-      if (paymentData.opaqueData) {
-        // Flujo recomendado con Accept.js
-        transactionRequest.payment = {
-          opaqueData: {
-            dataDescriptor: paymentData.opaqueData.dataDescriptor,
-            dataValue: paymentData.opaqueData.dataValue,
-          },
-        };
-        console.log("💳 Usando opaqueData (Accept.js)");
-      } else if (
-        paymentData.cardNumber &&
-        paymentData.expiry &&
-        paymentData.cvv
-      ) {
-        // Fallback (no recomendado por PCI, pero lo dejamos por compatibilidad)
-        transactionRequest.payment = {
-          creditCard: {
-            cardNumber: paymentData.cardNumber,
-            expirationDate: paymentData.expiry,
-            cardCode: paymentData.cvv,
-          },
-        };
-        console.log("⚠️ Usando tarjeta directa (fallback, no recomendado)");
-      } else {
-        throw new Error(
-          "No se proporcionó opaqueData ni datos de tarjeta para la transacción"
-        );
-      }
 
       const payload = {
         createTransactionRequest: {
@@ -192,7 +135,44 @@ class AuthorizeNetService {
             name: this.apiLoginId,
             transactionKey: this.transactionKey,
           },
-          transactionRequest,
+          transactionRequest: {
+            transactionType: "authCaptureTransaction",
+            amount: amount.toString(),
+            payment: {
+              creditCard: {
+                cardNumber: paymentData.cardNumber,
+                expirationDate: paymentData.expiry,
+                cardCode: paymentData.cvv,
+              },
+            },
+            order: {
+              // 🔹 Usamos el generador seguro de invoiceNumber
+              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
+              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
+            },
+            customer: {
+              email: paymentData.customerEmail,
+            },
+            billTo: {
+              firstName: paymentData.customerName.split(" ")[0],
+              lastName:
+                paymentData.customerName.split(" ").slice(1).join(" ") ||
+                "Customer",
+              email: paymentData.customerEmail,
+            },
+            userFields: {
+              userField: [
+                {
+                  name: "entityType",
+                  value: paymentData.entityType,
+                },
+                {
+                  name: "entityId",
+                  value: paymentData.entityId,
+                },
+              ],
+            },
+          },
         },
       };
 
@@ -260,6 +240,110 @@ class AuthorizeNetService {
         error.message;
 
       throw new Error(errorMessage);
+    }
+  }
+
+  // Crear Hosted Payment Page (HPP)
+  async createHostedPaymentPage(paymentData) {
+    try {
+      console.log("🔄 Creando página de pago hospedada...");
+      console.log("📝 Datos de pago:", {
+        client: paymentData.customerName,
+        email: paymentData.customerEmail,
+        amount: paymentData.amount,
+        entity: `${paymentData.entityType}-${paymentData.entityId}`,
+      });
+
+      const tokenPayload = {
+        getHostedPaymentPageRequest: {
+          merchantAuthentication: {
+            name: this.apiLoginId,
+            transactionKey: this.transactionKey,
+          },
+          transactionRequest: {
+            transactionType: "authCaptureTransaction",
+            amount: paymentData.amount.toString(),
+            order: {
+              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
+              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
+            },
+            customer: {
+              email: paymentData.customerEmail,
+            },
+          },
+          hostedPaymentSettings: {
+            setting: [
+              {
+                settingName: "hostedPaymentReturnOptions",
+                settingValue: JSON.stringify({
+                  showReceipt: true,
+                  url: `${BASE_URL}/authorize/return`,
+                  urlText: "Continue",
+                  cancelUrl: `${BASE_URL}/authorize/cancel`,
+                  cancelUrlText: "Cancel",
+                }),
+              },
+            ],
+          },
+        },
+      };
+
+      console.log("📤 Enviando request HPP a Authorize.Net:", {
+        url: `${this.getBaseUrl()}/xml/v1/request.api`,
+        environment: this.useSandbox ? "SANDBOX" : "PRODUCCIÓN",
+      });
+
+      const response = await axios.post(
+        `${this.getBaseUrl()}/xml/v1/request.api`,
+        tokenPayload,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 30000,
+        }
+      );
+
+      console.log(
+        "✅ Respuesta HPP Authorize.Net:",
+        JSON.stringify(response.data, null, 2)
+      );
+
+      const result = response.data;
+
+      if (result.token) {
+        const postUrl = `${
+          this.useSandbox
+            ? "https://test.authorize.net"
+            : "https://accept.authorize.net"
+        }/payment/payment`;
+
+        console.log("🔗 URL de pago (POST):", postUrl);
+        console.log(
+          "🔍 Token para POST:",
+          result.token.substring(0, 50) + "..."
+        );
+
+        return {
+          success: true,
+          postUrl: postUrl,
+          token: result.token,
+          referenceId: this.generateReferenceId(),
+          message: "Página de pago hospedada generada exitosamente",
+        };
+      } else {
+        const errorMsg =
+          result.messages?.message?.[0]?.text ||
+          "Error generando página de pago";
+        console.error("❌ Error en respuesta HPP:", errorMsg);
+        throw new Error(errorMsg);
+      }
+    } catch (error) {
+      console.error("💥 Error creando HPP:", {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message,
+        url: error.config?.url,
+      });
+      throw error;
     }
   }
 
@@ -334,9 +418,7 @@ class Bitrix24 {
       const deal = await this.getDeal(dealId);
 
       if (deal && deal.CONTACT_ID && deal.CONTACT_ID !== "0") {
-        console.log(
-          `✅ Deal tiene contacto asociado: ${deal.CONTACT_ID}`
-        );
+        console.log(`✅ Deal tiene contacto asociado: ${deal.CONTACT_ID}`);
         const contact = await this.getContact(deal.CONTACT_ID);
         return contact;
       } else {
@@ -344,10 +426,7 @@ class Bitrix24 {
         return null;
       }
     } catch (error) {
-      console.error(
-        "❌ Error obteniendo contacto desde deal:",
-        error.message
-      );
+      console.error("❌ Error obteniendo contacto desde deal:", error.message);
       return null;
     }
   }
@@ -379,13 +458,10 @@ class Bitrix24 {
   async updateDeal(dealId, data) {
     try {
       console.log(`🔄 Actualizando deal ${dealId}...`);
-      const response = await axios.post(
-        `${this.webhookUrl}/crm.deal.update`,
-        {
-          id: dealId,
-          fields: data,
-        }
-      );
+      const response = await axios.post(`${this.webhookUrl}/crm.deal.update`, {
+        id: dealId,
+        fields: data,
+      });
       console.log(`✅ Deal actualizado exitosamente`);
       return response.data.result;
     } catch (error) {
@@ -415,17 +491,18 @@ async function sendPaymentEmail(
   amount = null
 ) {
   try {
+    // Obtener el monto del deal si no se proporciona
     let dealAmount = amount;
     if (!dealAmount && dealId) {
       try {
         const deal = await bitrix24.getDeal(dealId);
-        dealAmount = deal?.OPPORTUNITY || "20.80";
+        dealAmount = deal?.OPPORTUNITY || "20.80"; // Valor por defecto
       } catch (error) {
         console.error("Error obteniendo monto del deal:", error);
-        dealAmount = "20.80";
+        dealAmount = "20.80"; // Valor por defecto
       }
     } else if (!dealAmount) {
-      dealAmount = "20.80";
+      dealAmount = "20.80"; // Valor por defecto
     }
 
     const mailOptions = {
@@ -464,10 +541,10 @@ async function sendPaymentEmail(
 
         <div class="amount-info">
             <p><strong>Referencia:</strong> Deal #${dealId}</p>
-            <p><strong>Monto a pagar (sugerido):</strong> <strong>$${dealAmount} USD</strong></p>
+            <p><strong>Monto a pagar:</strong> <strong>$${dealAmount} USD</strong></p>
         </div>
 
-        <p>Para completar tu pago, haz clic en el siguiente botón. Serás enviado a nuestro portal de pago seguro:</p>
+        <p>Para completar tu pago, haz clic en el siguiente botón. Serás enviado directamente al portal seguro de pagos de Authorize.Net:</p>
 
         <div style="text-align: center; margin: 24px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
@@ -478,6 +555,7 @@ async function sendPaymentEmail(
         <p><strong>Importante:</strong></p>
         <ul>
             <li>Este link es válido por 24 horas.</li>
+            <li>El monto de <strong>$${dealAmount} USD</strong> está fijado para esta transacción.</li>
             <li>El pago se procesa a través de Authorize.Net en un entorno cifrado.</li>
         </ul>
 
@@ -494,9 +572,7 @@ async function sendPaymentEmail(
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(
-      `✅ Email enviado a: ${email} con monto sugerido: $${dealAmount}`
-    );
+    console.log(`✅ Email enviado a: ${email} con monto fijo: $${dealAmount}`);
     return info;
   } catch (error) {
     console.error("❌ Error enviando email:", error);
@@ -538,7 +614,9 @@ async function sendPaymentConfirmation(email, paymentData) {
         <div class="receipt">
             <h3>📋 Comprobante de Pago</h3>
             <p><strong>Monto:</strong> $${paymentData.amount}</p>
-            <p><strong>ID de Transacción:</strong> ${paymentData.transactionId}</p>
+            <p><strong>ID de Transacción:</strong> ${
+              paymentData.transactionId
+            }</p>
             <p><strong>Código de Autorización:</strong> ${
               paymentData.authCode || "N/A"
             }</p>
@@ -574,7 +652,7 @@ async function sendPaymentConfirmation(email, paymentData) {
 }
 
 // =====================================
-// COMUNICADOR IFRAME (no estrictamente necesario con Accept.js, lo dejamos)
+// COMUNICADOR IFRAME PARA AUTHORIZE.NET
 // =====================================
 app.get("/iframe-communicator", (req, res) => {
   res.send(`
@@ -597,6 +675,7 @@ app.get("/iframe-communicator", (req, res) => {
         
         window.addEventListener("message", receiveMessage, false);
         
+        // Notificar que el iframe está listo
         if (window.parent !== window) {
             window.parent.postMessage("iframeReady", "*");
         }
@@ -715,15 +794,11 @@ app.post("/widget/bitrix24", async (req, res) => {
         </html>
       `;
     } else {
-      const clientEmail =
-        contactData?.EMAIL?.[0]?.VALUE || "No disponible";
+      const clientEmail = contactData?.EMAIL?.[0]?.VALUE || "No disponible";
       const clientName = contactData
-        ? `${contactData.NAME || ""} ${
-            contactData.LAST_NAME || ""
-          }`.trim()
+        ? `${contactData.NAME || ""} ${contactData.LAST_NAME || ""}`.trim()
         : "Cliente no disponible";
-      const clientPhone =
-        contactData?.PHONE?.[0]?.VALUE || "No disponible";
+      const clientPhone = contactData?.PHONE?.[0]?.VALUE || "No disponible";
 
       widgetHTML = `
 <!DOCTYPE html>
@@ -761,7 +836,7 @@ app.post("/widget/bitrix24", async (req, res) => {
     <div class="widget-container">
         <div class="header">
             <h2>Ensurity Express Payments</h2>
-            <p>Sistema de pagos con Authorize.Net (Accept.js)</p>
+            <p>Sistema de pagos con Authorize.Net</p>
         </div>
 
         <div class="content">
@@ -789,7 +864,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 <div class="amount-info">
                     <div class="info-item">
                         <span class="info-icon">💰</span>
-                        <span><strong>Monto del deal (sugerido):</strong> $${dealAmount} USD</span>
+                        <span><strong>Monto del deal:</strong> $${dealAmount} USD</span>
                     </div>
                 </div>
                 `
@@ -798,11 +873,11 @@ app.post("/widget/bitrix24", async (req, res) => {
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generar link de pago (formulario propio)
+                🎯 Generar link de pago Authorize.Net
             </button>
 
             <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
-                📧 Enviar link por email
+                📧 Enviar link por email (monto fijo)
             </button>
 
             <button class="btn btn-secondary" onclick="testConnection()">
@@ -849,9 +924,12 @@ app.post("/widget/bitrix24", async (req, res) => {
                         '✅ <strong>Link generado exitosamente</strong></div><br>' +
                         '<strong>🔗 Enlace de pago seguro:</strong><br>' +
                         '<div class="link-display">' + result.paymentLink + '</div><br>' +
+                        '<div class="amount-info">' +
+                        '<strong>💡 Nota:</strong> El cliente podrá modificar el monto en el portal de pagos.' +
+                        '</div><br>' +
                         '<button class="btn" onclick="copyToClipboard(\\'' + result.paymentLink + '\\')">📋 Copiar link</button>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #ffeaea; border-radius: 5px; font-size: 11px; color: #af100a;">' +
-                        '💡 Envía este link al cliente para que complete el pago en nuestro formulario seguro.' +
+                        '💡 Envía este link al cliente para que complete el pago.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -891,8 +969,11 @@ app.post("/widget/bitrix24", async (req, res) => {
                         '<div class="email-section">' +
                         '<strong>📧 Destinatario:</strong> ' + CLIENT_EMAIL + '<br>' +
                         '<strong>👤 Cliente:</strong> ' + CLIENT_NAME + '<br>' +
-                        '<strong>💰 Monto sugerido:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
+                        '<strong>💰 Monto predefinido:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
                         '<strong>🆔 Referencia:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
+                        '</div>' +
+                        '<div style="margin-top: 10px; padding: 8px; background: #d4edda; border-radius: 5px; font-size: 11px; color: #155724;">' +
+                        '💡 El cliente recibió el link de pago por email con el monto fijo establecido.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -959,7 +1040,7 @@ app.post("/widget/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// WEBHOOK PARA GENERAR LINKS DE PAGO (formulario propio Accept.js)
+// WEBHOOK PARA GENERAR LINKS DE PAGO
 // =====================================
 app.post("/webhook/bitrix24", async (req, res) => {
   console.log("🔗 WEBHOOK BITRIX24 LLAMADO");
@@ -1028,7 +1109,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
       contactEmail: contactEmail,
       flowType: "direct_link",
       message:
-        "Link de pago generado exitosamente - Cliente paga en formulario Ensurity (Accept.js)",
+        "Link de pago generado exitosamente - Cliente puede modificar monto",
     });
   } catch (error) {
     console.error("❌ Error en webhook:", error);
@@ -1040,7 +1121,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// RUTA DE PAGO CON TOKEN (FORMULARIO Accept.js)
+// RUTA DE PAGO CON TOKEN
 // =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
@@ -1108,16 +1189,124 @@ app.get("/payment/:token", async (req, res) => {
       `✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail}) - Flujo: ${tokenData.flowType}`
     );
 
+    const isEmailFlow = tokenData.flowType === "email";
     const defaultAmount = tokenData.dealAmount || "20.80";
+    const allowAmountModification = !isEmailFlow;
 
-    const apiLoginIdSafe = authorizeService.apiLoginId || "";
-    const clientKeySafe = authorizeService.clientKey || "";
+    // 🔴 NUEVO: si el flujo es EMAIL, redirigir directo a Authorize.Net
+    if (isEmailFlow) {
+      const emailRedirectHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirigiendo al Pago Seguro - Ensurity Express</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f4f4;
+            margin: 0; padding: 0;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            max-width: 420px;
+            text-align: center;
+        }
+        .title { color: #af100a; font-size: 20px; margin-bottom: 8px; }
+        .subtitle { color: #6c757d; font-size: 14px; margin-bottom: 18px; }
+        .loading { 
+            display: inline-block; width: 26px; height: 26px; 
+            border: 3px solid #f3f3f3; border-top: 3px solid #af100a; 
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .small { font-size: 12px; color: #6c757d; margin-top: 10px; }
+        .error { color: #721c24; background: #f8d7da; border-radius: 8px; padding: 12px; font-size: 13px; margin-top: 10px; }
+        .btn-retry {
+            margin-top: 12px; padding: 8px 16px;
+            background: linear-gradient(90deg,#af100a 0%,#5b0000 100%);
+            color: #fff; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 13px; font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="loading"></div>
+        <div class="title">Redirigiendo al pago seguro...</div>
+        <div class="subtitle">
+            Estamos generando tu sesión de pago en Authorize.Net por <strong>$${defaultAmount} USD</strong>.
+        </div>
+        <div class="small">Por favor, no cierres esta ventana.</div>
+        <div id="errorMessage" class="error" style="display:none;"></div>
+        <button id="retryBtn" class="btn-retry" style="display:none;" onclick="startPayment()">🔄 Reintentar</button>
+    </div>
 
+    <script>
+        const TOKEN = '${token}';
+        const SERVER_URL = '${BASE_URL}';
+        const AMOUNT = '${defaultAmount}';
+
+        async function startPayment() {
+            const errorDiv = document.getElementById('errorMessage');
+            const retryBtn = document.getElementById('retryBtn');
+            errorDiv.style.display = 'none';
+            retryBtn.style.display = 'none';
+
+            try {
+                const response = await fetch(SERVER_URL + '/api/generate-authorize-link', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: TOKEN, amount: AMOUNT })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = result.postUrl;
+                    form.style.display = 'none';
+
+                    const tokenInput = document.createElement('input');
+                    tokenInput.type = 'hidden';
+                    tokenInput.name = 'token';
+                    tokenInput.value = result.token;
+
+                    form.appendChild(tokenInput);
+                    document.body.appendChild(form);
+
+                    form.submit();
+                } else {
+                    throw new Error(result.error || 'No se pudo generar el link de pago.');
+                }
+            } catch (error) {
+                console.error('Error generando link de pago:', error);
+                errorDiv.textContent = '❌ Ocurrió un error al generar el link de pago. Por favor intenta nuevamente.';
+                errorDiv.style.display = 'block';
+                retryBtn.style.display = 'inline-block';
+            }
+        }
+
+        window.addEventListener('load', startPayment);
+    </script>
+</body>
+</html>
+      `;
+      return res.send(emailRedirectHtml);
+    }
+
+    // 🔵 FLUJO NORMAL (widget, link directo): formulario para elegir/modificar monto
     const paymentForm = `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ensurity Express - Portal de Pagos Seguro (Accept.js)</title>
+    <title>Ensurity Express - Portal de Pagos Seguro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1144,23 +1333,19 @@ app.get("/payment/:token", async (req, res) => {
             background: #f8f9fa; padding: 16px; border-radius: 10px; margin-bottom: 18px;
             border-left: 4px solid #af100a; font-size: 13px;
         }
-        .form-group { margin-bottom: 16px; }
+        .form-group { margin-bottom: 18px; }
         .form-group label {
             display: block; margin-bottom: 6px; font-weight: 600; color: #af100a; font-size: 13px;
         }
         .form-group input {
-            width: 100%; padding: 10px 12px; border: 2px solid #e9ecef; border-radius: 8px;
-            font-size: 14px; transition: border-color 0.3s ease;
+            width: 100%; padding: 11px 14px; border: 2px solid #e9ecef; border-radius: 8px;
+            font-size: 16px; transition: border-color 0.3s ease;
         }
         .form-group input:focus {
             outline: none; border-color: #af100a; box-shadow: 0 0 0 3px rgba(175, 16, 10, 0.1);
         }
-        .form-row {
-            display: flex;
-            gap: 8px;
-        }
-        .form-row .form-group {
-            flex: 1;
+        .form-group input:disabled {
+            background-color: #f8f9fa; color: #6c757d; cursor: not-allowed;
         }
         .btn-pay {
             background: linear-gradient(90deg, #af100a 0%, #5b0000 100%);
@@ -1179,9 +1364,13 @@ app.get("/payment/:token", async (req, res) => {
             background: #ffeaea; padding: 12px; border-radius: 8px; margin-top: 16px;
             text-align: center; font-size: 12px; color: #af100a; border: 1px solid #ffcdd2;
         }
+        .fixed-amount-notice {
+            background: #e7f3ff; padding: 10px; border-radius: 8px; margin-top: 8px;
+            text-align: center; font-size: 12px; color: #0066cc; border: 1px solid #b3d9ff;
+        }
         .loading { 
             display: inline-block; width: 20px; height: 20px; 
-            border: 3px solid #f3f3f3; border-top: 3px solid #000000; 
+            border: 3px solid #f3f3f3; border-top: 3px solid #af100a; 
             border-radius: 50%; animation: spin 1s linear infinite; 
         }
         @keyframes spin { 
@@ -1198,74 +1387,63 @@ app.get("/payment/:token", async (req, res) => {
             background: #af100a; color: white; padding: 6px 12px; border-radius: 20px;
             font-size: 11px; font-weight: bold; display: inline-block; margin-bottom: 12px;
         }
-        .field-note {
-            font-size: 11px; color: #6c757d; margin-top: 4px;
-        }
     </style>
-    <script type="text/javascript"
-      src="https://js.authorize.net/v3/Accept.js">
-    </script>
 </head>
 <body>
     <div class="payment-container">
         <div class="payment-header">
             <h1>Portal de pagos seguro</h1>
-            <p>Ensurity Express · Procesado con Authorize.Net (Accept.js)</p>
+            <p>Ensurity Express · Procesado con Authorize.Net</p>
         </div>
 
         <div class="payment-content">
             <div class="flow-indicator">
-                💳 FORMULARIO ENSURITY · TOKENIZADO CON ACCEPT.JS
+                ${
+                  allowAmountModification
+                    ? "🔗 LINK DIRECTO - Monto modificable"
+                    : "📧 EMAIL - Monto fijo"
+                }
             </div>
 
             <div class="client-summary">
                 <p><strong>👤 Cliente:</strong> ${tokenData.contactName}</p>
                 <p><strong>📧 Email:</strong> ${tokenData.contactEmail}</p>
-                <p><strong>🆔 Referencia:</strong> ${(tokenData.entityType || "DEAL").toUpperCase()}-${tokenData.entityId}</p>
+                <p><strong>🆔 Referencia:</strong> ${(
+                  tokenData.entityType || "DEAL"
+                ).toUpperCase()}-${tokenData.entityId}</p>
                 <p><strong>💰 Monto sugerido:</strong> $${defaultAmount} USD</p>
                 <p><strong>🏦 Entorno:</strong> ${
-                  authorizeService.useSandbox ? "SANDBOX (Pruebas)" : "PRODUCCIÓN"
+                  authorizeService.useSandbox
+                    ? "SANDBOX (Pruebas)"
+                    : "PRODUCCIÓN"
                 }</p>
             </div>
 
             <form id="paymentForm">
                 <div class="form-group">
                     <label for="amount">💵 Monto a pagar (USD)</label>
-                    <input type="number" id="amount" name="amount"
-                           placeholder="0.00" min="1" step="0.01"
-                           value="${defaultAmount}" required>
-                    <div class="field-note">
-                        💡 Puedes ajustar el monto si es necesario.
+                    <input type="number" id="amount" name="amount" 
+                           placeholder="0.00" min="1" step="0.01" 
+                           value="${defaultAmount}" 
+                           ${allowAmountModification ? "" : "disabled"}
+                           required>
+                    ${
+                      !allowAmountModification
+                        ? `
+                    <div class="fixed-amount-notice">
+                        🔒 <strong>Monto predefinido:</strong> Este pago tiene un monto fijo de $${defaultAmount} USD establecido por el agente.
                     </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="cardNumber">💳 Número de tarjeta</label>
-                    <input type="text" id="cardNumber" maxlength="19" autocomplete="off" placeholder="4111 1111 1111 1111" required>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="expMonth">Mes (MM)</label>
-                        <input type="text" id="expMonth" maxlength="2" autocomplete="off" placeholder="12" required>
+                    `
+                        : `
+                    <div style="font-size: 11px; color: #6c757d; margin-top: 4px;">
+                        💡 Puedes modificar el monto según sea necesario.
                     </div>
-                    <div class="form-group">
-                        <label for="expYear">Año (YYYY)</label>
-                        <input type="text" id="expYear" maxlength="4" autocomplete="off" placeholder="2027" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="cardCode">CVV</label>
-                        <input type="password" id="cardCode" maxlength="4" autocomplete="off" placeholder="123" required>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="cardName">Nombre en la tarjeta</label>
-                    <input type="text" id="cardName" autocomplete="off" placeholder="Nombre y apellido" required>
+                    `
+                    }
                 </div>
 
                 <button type="submit" class="btn-pay" id="submitBtn">
-                    <span id="btnText">🚀 Procesar pago seguro</span>
+                    <span id="btnText">🚀 Generar sesión de pago Authorize.Net</span>
                     <div id="btnLoading" class="loading" style="display: none;"></div>
                 </button>
             </form>
@@ -1273,8 +1451,8 @@ app.get("/payment/:token", async (req, res) => {
             <div id="resultMessage" class="result-message"></div>
 
             <div class="security-notice">
-                🔒 Tus datos de tarjeta se tokenizan con Accept.js de Authorize.Net.
-                Nuestro servidor solo recibe un token seguro (opaqueData), no el número de tarjeta.
+                🔒 Serás redirigido a una página de pago segura de Authorize.Net. 
+                Tus datos están protegidos con encriptación SSL.
             </div>
         </div>
     </div>
@@ -1282,117 +1460,86 @@ app.get("/payment/:token", async (req, res) => {
     <script>
         const TOKEN = '${token}';
         const SERVER_URL = '${BASE_URL}';
-        const API_LOGIN_ID = '${apiLoginIdSafe}';
-        const CLIENT_KEY = '${clientKeySafe}';
+        const ALLOW_AMOUNT_MODIFICATION = ${allowAmountModification};
 
-        const paymentForm = document.getElementById('paymentForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const btnText = document.getElementById('btnText');
-        const btnLoading = document.getElementById('btnLoading');
-        const resultMessage = document.getElementById('resultMessage');
-
-        function setLoading(isLoading) {
-            submitBtn.disabled = isLoading;
-            btnText.style.display = isLoading ? 'none' : 'inline';
-            btnLoading.style.display = isLoading ? 'inline-block' : 'none';
-        }
-
-        function showMessage(type, html) {
-            resultMessage.innerHTML = html;
-            resultMessage.className = 'result-message ' + type;
-            resultMessage.style.display = 'block';
-        }
-
-        paymentForm.addEventListener('submit', function (e) {
+        document.getElementById('paymentForm').addEventListener('submit', async function(e) {
             e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnLoading = document.getElementById('btnLoading');
+            const resultMessage = document.getElementById('resultMessage');
 
-            if (!API_LOGIN_ID || !CLIENT_KEY) {
-                showMessage('error', '❌ Falta configuración de Authorize.Net en el servidor (API_LOGIN_ID o CLIENT_KEY).');
-                return;
-            }
+            submitBtn.disabled = true;
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline-block';
+            resultMessage.style.display = 'none';
 
-            const cardNumber = document.getElementById('cardNumber').value.replace(/\\s+/g, '');
-            const expMonth = document.getElementById('expMonth').value;
-            const expYear = document.getElementById('expYear').value;
-            const cardCode = document.getElementById('cardCode').value;
-            const cardName = document.getElementById('cardName').value;
             const amount = document.getElementById('amount').value;
 
-            if (!cardNumber || !expMonth || !expYear || !cardCode || !cardName || !amount) {
-                showMessage('error', '❌ Por favor completa todos los campos.');
-                return;
-            }
+            try {
+                console.log('Generando link de pago Authorize.Net...');
 
-            setLoading(true);
-            showMessage('success', '⏳ Tokenizando tu tarjeta de forma segura...');
-
-            const authData = {
-                apiLoginID: API_LOGIN_ID,
-                clientKey: CLIENT_KEY
-            };
-
-            const cardData = {
-                cardNumber: cardNumber,
-                month: expMonth,
-                year: expYear,
-                cardCode: cardCode
-            };
-
-            const secureData = {
-                authData: authData,
-                cardData: cardData
-            };
-
-            if (!window.Accept || !window.Accept.dispatchData) {
-                showMessage('error', '❌ Accept.js no está cargado correctamente. Verifica la conexión.');
-                setLoading(false);
-                return;
-            }
-
-            Accept.dispatchData(secureData, function (response) {
-                if (response.messages.resultCode === 'Error') {
-                    const firstError = response.messages.message[0];
-                    showMessage('error', '❌ Error tokenizando tarjeta: ' + firstError.text);
-                    setLoading(false);
-                    return;
-                }
-
-                const opaqueData = response.opaqueData;
-
-                fetch(SERVER_URL + '/api/process-payment', {
+                const response = await fetch(SERVER_URL + '/api/generate-authorize-link', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({
                         token: TOKEN,
-                        amount: amount,
-                        opaqueData: {
-                            dataDescriptor: opaqueData.dataDescriptor,
-                            dataValue: opaqueData.dataValue
-                        }
+                        amount: amount
                     })
-                })
-                .then(res => res.json())
-                .then(result => {
-                    if (result.success) {
-                        showMessage('success', '✅ Pago procesado correctamente. Redirigiendo al comprobante...');
-                        setTimeout(() => {
-                            if (result.redirectUrl) {
-                                window.location.href = result.redirectUrl;
-                            } else {
-                                window.location.href = SERVER_URL + '/payment-success?amount=' + encodeURIComponent(amount);
-                            }
-                        }, 1200);
-                    } else {
-                        showMessage('error', '❌ Error procesando pago: ' + (result.error || 'Error desconocido'));
-                        setLoading(false);
-                    }
-                })
-                .catch(err => {
-                    showMessage('error', '❌ Error de conexión: ' + err.message);
-                    setLoading(false);
                 });
-            });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = result.postUrl;
+                    form.style.display = 'none';
+
+                    const tokenInput = document.createElement('input');
+                    tokenInput.type = 'hidden';
+                    tokenInput.name = 'token';
+                    tokenInput.value = result.token;
+
+                    form.appendChild(tokenInput);
+                    document.body.appendChild(form);
+
+                    resultMessage.innerHTML = 
+                        '✅ <strong>Sesión generada</strong><br>' +
+                        'Redirigiendo a la página de pago segura de Authorize.Net...';
+                    resultMessage.className = 'result-message success';
+                    resultMessage.style.display = 'block';
+
+                    setTimeout(() => {
+                        form.submit();
+                    }, 1200);
+
+                } else {
+                    throw new Error(result.error || 'Error generando link de pago');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                resultMessage.innerHTML = 
+                    '❌ <strong>Error al generar el link</strong><br>' +
+                    error.message + '<br><br>' +
+                    '<button onclick="location.reload()" style="background: #af100a; color: white; padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px;">🔄 Reintentar</button>';
+                resultMessage.className = 'result-message error';
+                resultMessage.style.display = 'block';
+            } finally {
+                submitBtn.disabled = false;
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+            }
         });
+
+        if (window.location.hostname === 'localhost' || window.location.hostname.includes('ngrok')) {
+            console.log('Modo desarrollo activado');
+            console.log('Flujo:', ALLOW_AMOUNT_MODIFICATION ? 'Monto modificable' : 'Monto fijo');
+        }
     </script>
 </body>
 </html>
@@ -1411,61 +1558,13 @@ app.get("/payment/:token", async (req, res) => {
 });
 
 // =====================================
-// PAGO DIRECTO DESDE WEB → redirige a /payment/:token
-// =====================================
-app.get("/pay-direct", async (req, res) => {
-  console.log("💳 PAGO DIRECTO /pay-direct");
-
-  try {
-    const amountParam = req.query.amount;
-    const nameParam = req.query.name;
-    const referenceParam = req.query.reference;
-
-    const amount =
-      amountParam && parseFloat(amountParam) > 0 ? amountParam : "20.80";
-
-    const customerName = nameParam || "Cliente Web";
-    const customerEmail = "webpayment@ensurityexpress.com";
-    const entityId = referenceParam || "WEB_PAYMENT";
-    const entityType = "web";
-
-    const token = generateSecureToken();
-    const tokenData = {
-      entityId,
-      entityType,
-      contactEmail: customerEmail,
-      contactName: customerName,
-      dealAmount: amount,
-      timestamp: Date.now(),
-      expires: Date.now() + 24 * 60 * 60 * 1000,
-      flowType: "web_direct",
-    };
-    paymentTokens.set(token, tokenData);
-
-    console.log("✅ Token web_direct generado, redirigiendo a /payment/:token");
-    res.redirect(`/payment/${token}`);
-  } catch (error) {
-    console.error("💥 Error en /pay-direct:", {
-      message: error.message,
-      responseStatus: error.response?.status,
-      responseData: error.response?.data,
-    });
-
-    res
-      .status(500)
-      .send("Error al iniciar el pago. Intenta nuevamente más tarde.");
-  }
-});
-
-// =====================================
 // API PARA ENVIAR EMAIL CON LINK DE PAGO
 // =====================================
 app.post("/api/send-payment-email", async (req, res) => {
-  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON LINK");
+  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON MONTO FIJO");
 
   try {
-    const { entityId, entityType, clientEmail, clientName, amount } =
-      req.body;
+    const { entityId, entityType, clientEmail, clientName, amount } = req.body;
 
     if (!entityId || !clientEmail) {
       return res.status(400).json({
@@ -1494,7 +1593,7 @@ app.post("/api/send-payment-email", async (req, res) => {
       dealAmount: dealAmount,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
-      flowType: "email",
+      flowType: "email", // 🔴 FLUJO EMAIL (monto fijo, redirección directa)
     };
 
     paymentTokens.set(token, tokenData);
@@ -1511,7 +1610,7 @@ app.post("/api/send-payment-email", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Email enviado exitosamente con link de pago",
+      message: "Email enviado exitosamente con monto fijo",
       clientEmail: clientEmail,
       clientName: clientName,
       entityId: entityId,
@@ -1529,13 +1628,13 @@ app.post("/api/send-payment-email", async (req, res) => {
 });
 
 // =====================================
-// API PARA PROCESAR PAGOS CON AUTHORIZE.NET (Accept.js)
+// API PARA GENERAR LINK AUTHORIZE.NET HPP
 // =====================================
-app.post("/api/process-payment", async (req, res) => {
-  console.log("💳 PROCESANDO PAGO CON AUTHORIZE.NET (ACCEPT.JS)");
+app.post("/api/generate-authorize-link", async (req, res) => {
+  console.log("🔗 SOLICITUD DE GENERACIÓN AUTHORIZE.NET HPP");
 
   try {
-    const { token, amount, opaqueData } = req.body;
+    const { token, amount } = req.body;
 
     if (!token) {
       return res.status(400).json({
@@ -1560,10 +1659,72 @@ app.post("/api/process-payment", async (req, res) => {
       });
     }
 
-    if (!opaqueData || !opaqueData.dataDescriptor || !opaqueData.dataValue) {
+    console.log("🔄 Generando link Authorize.Net para:", {
+      client: tokenData.contactName,
+      email: tokenData.contactEmail,
+      amount: amount,
+      entity: `${tokenData.entityType}-${tokenData.entityId}`,
+      flowType: tokenData.flowType,
+    });
+
+    const hppResult = await authorizeService.createHostedPaymentPage({
+      amount: amount,
+      customerName: tokenData.contactName,
+      customerEmail: tokenData.contactEmail,
+      entityId: tokenData.entityId,
+      entityType: tokenData.entityType,
+    });
+
+    tokenData.authorizeReferenceId = hppResult.referenceId;
+    tokenData.authorizeToken = hppResult.token;
+    tokenData.finalAmount = amount;
+    paymentTokens.set(token, tokenData);
+
+    console.log(
+      `✅ Referencia Authorize.Net guardada: ${hppResult.referenceId} - Monto: $${amount}`
+    );
+
+    res.json({
+      success: true,
+      postUrl: hppResult.postUrl,
+      token: hppResult.token,
+      referenceId: hppResult.referenceId,
+      amount: amount,
+      flowType: tokenData.flowType,
+      message: "Link de pago Authorize.Net generado exitosamente",
+    });
+  } catch (error) {
+    console.error("❌ Error generando link Authorize.Net:", error.message);
+
+    res.status(500).json({
+      success: false,
+      error: error.message || "Error al generar el link de pago",
+    });
+  }
+});
+
+// =====================================
+// API PARA PROCESAR PAGOS CON AUTHORIZE.NET
+// =====================================
+app.post("/api/process-payment", async (req, res) => {
+  console.log("💳 PROCESANDO PAGO CON AUTHORIZE.NET (INTEGRACIÓN REAL)");
+
+  try {
+    const { token, amount, cardNumber, expiry, cvv, cardName } = req.body;
+
+    if (!token) {
       return res.status(400).json({
         success: false,
-        error: "opaqueData inválido. Verifica Accept.js en el front.",
+        error: "Token no proporcionado",
+      });
+    }
+
+    const tokenData = paymentTokens.get(token);
+
+    if (!tokenData) {
+      return res.status(400).json({
+        success: false,
+        error: "Token inválido o expirado",
       });
     }
 
@@ -1575,7 +1736,10 @@ app.post("/api/process-payment", async (req, res) => {
     });
 
     const authResult = await authorizeService.createTransaction(amount, {
-      opaqueData,
+      cardNumber: cardNumber,
+      expiry: expiry,
+      cvv: cvv,
+      cardName: cardName,
       customerName: tokenData.contactName,
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
@@ -1608,19 +1772,10 @@ app.post("/api/process-payment", async (req, res) => {
       });
       console.log(`✅ Bitrix24 actualizado para deal ${tokenData.entityId}`);
     } catch (bitrixError) {
-      console.error(
-        "❌ Error actualizando Bitrix24:",
-        bitrixError.message
-      );
+      console.error("❌ Error actualizando Bitrix24:", bitrixError.message);
     }
 
     paymentTokens.delete(token);
-
-    const redirectUrl = `${BASE_URL}/payment-success?amount=${encodeURIComponent(
-      amount
-    )}&processor=Authorize.Net&reference=${encodeURIComponent(
-      authResult.referenceId || authResult.transactionId
-    )}`;
 
     res.json({
       success: true,
@@ -1631,13 +1786,9 @@ app.post("/api/process-payment", async (req, res) => {
       amount: amount,
       clientEmail: tokenData.contactEmail,
       authResponse: authResult.fullResponse,
-      redirectUrl,
     });
   } catch (error) {
-    console.error(
-      "❌ Error procesando pago con Authorize.Net:",
-      error.message
-    );
+    console.error("❌ Error procesando pago con Authorize.Net:", error.message);
 
     res.status(500).json({
       success: false,
@@ -1648,7 +1799,7 @@ app.post("/api/process-payment", async (req, res) => {
 });
 
 // =====================================
-// WEBHOOK SILENT POST DE AUTHORIZE.NET (opcional)
+// WEBHOOK SILENT POST DE AUTHORIZE.NET
 // =====================================
 app.post("/api/authorize-webhook", async (req, res) => {
   console.log("🔔 AUTHORIZE.NET SILENT POST WEBHOOK RECIBIDO");
@@ -1695,7 +1846,7 @@ app.post("/api/authorize-webhook", async (req, res) => {
 });
 
 // =====================================
-// CALLBACKS DE AUTHORIZE.NET (por si usas HPP en paralelo)
+// CALLBACKS DE AUTHORIZE.NET
 // =====================================
 app.get("/authorize/return", async (req, res) => {
   console.log("✅ Authorize.Net Return URL llamada (GET)");
@@ -1707,13 +1858,55 @@ app.get("/authorize/return", async (req, res) => {
 
   try {
     if (transactionId) {
-      console.log(
-        `🔍 Obteniendo detalles de transacción: ${transactionId}`
-      );
+      console.log(`🔍 Obteniendo detalles de transacción: ${transactionId}`);
 
-      const transactionDetails =
-        await authorizeService.getTransactionStatus(transactionId);
+      const transactionDetails = await authorizeService.getTransactionStatus(
+        transactionId
+      );
       console.log("📋 Detalles de transacción:", transactionDetails);
+
+      for (let [token, tokenData] of paymentTokens.entries()) {
+        if (
+          tokenData.authorizeReferenceId &&
+          tokenData.authorizeReferenceId.includes(transactionId)
+        ) {
+          console.log(`✅ Token encontrado para transacción ${transactionId}`);
+
+          try {
+            await bitrix24.updateDeal(tokenData.entityId, {
+              UF_CRM_PAYMENT_STATUS: "completed",
+              UF_CRM_PAYMENT_AMOUNT:
+                transactionAmount || tokenData.finalAmount || "1.00",
+              UF_CRM_PAYMENT_DATE: new Date().toISOString(),
+              UF_CRM_TRANSACTION_ID: transactionId,
+              UF_CRM_PAYMENT_PROCESSOR: "Authorize.Net",
+              UF_CRM_PAYMENT_FLOW: tokenData.flowType || "unknown",
+            });
+            console.log(
+              `✅ Bitrix24 actualizado para deal ${tokenData.entityId}`
+            );
+          } catch (bitrixError) {
+            console.error(
+              "❌ Error actualizando Bitrix24:",
+              bitrixError.message
+            );
+          }
+
+          try {
+            await sendPaymentConfirmation(tokenData.contactEmail, {
+              clientName: tokenData.contactName,
+              amount: transactionAmount || tokenData.finalAmount || "1.00",
+              transactionId: transactionId,
+              entityType: tokenData.entityType,
+              entityId: tokenData.entityId,
+            });
+          } catch (emailError) {
+            console.error("❌ Error enviando email:", emailError.message);
+          }
+
+          break;
+        }
+      }
     }
 
     res.redirect(
@@ -1748,6 +1941,142 @@ app.post("/authorize/return", async (req, res) => {
   } catch (error) {
     console.error("❌ Error en return URL (POST):", error);
     res.redirect(`${BASE_URL}/payment-success`);
+  }
+});
+
+// =====================================
+// PAGO DIRECTO DESDE WEB (SIN EMAIL / SIN PÁGINA INTERMEDIA)
+// =====================================
+app.get("/pay-direct", async (req, res) => {
+  console.log("💳 PAGO DIRECTO /pay-direct");
+
+  try {
+    // Parámetros opcionales desde la URL
+    const amountParam = req.query.amount;
+    const nameParam = req.query.name;
+    const referenceParam = req.query.reference;
+
+    // Monto por defecto si no mandas nada
+    const amount =
+      amountParam && parseFloat(amountParam) > 0 ? amountParam : "20.80";
+
+    const customerName = nameParam || "Cliente Web";
+    const customerEmail = "webpayment@ensurityexpress.com"; // correo genérico
+    const entityId = referenceParam || "WEB_PAYMENT";
+    const entityType = "web";
+
+    console.log("🔄 Creando HPP directo para:", {
+      amount,
+      customerName,
+      customerEmail,
+      entityId,
+      entityType,
+    });
+
+    // Creamos un token interno para seguir rastreando esta sesión si hace falta
+    const token = generateSecureToken();
+    const tokenData = {
+      entityId,
+      entityType,
+      contactEmail: customerEmail,
+      contactName: customerName,
+      dealAmount: amount,
+      timestamp: Date.now(),
+      expires: Date.now() + 24 * 60 * 60 * 1000,
+      flowType: "web_direct",
+    };
+    paymentTokens.set(token, tokenData);
+
+    // Generar Hosted Payment Page en Authorize.Net
+    const hppResult = await authorizeService.createHostedPaymentPage({
+      amount,
+      customerName,
+      customerEmail,
+      entityId,
+      entityType,
+    });
+
+    if (!hppResult || !hppResult.success) {
+      console.error("❌ Error HPP (estructura inesperada):", hppResult);
+      throw new Error(
+        hppResult?.error || "No se pudo generar la página de pago"
+      );
+    }
+
+    // Guardar referencia de Authorize.Net en el token
+    tokenData.authorizeReferenceId = hppResult.referenceId;
+    tokenData.authorizeToken = hppResult.token;
+    tokenData.finalAmount = amount;
+    paymentTokens.set(token, tokenData);
+
+    console.log("✅ HPP generado correctamente:", {
+      postUrl: hppResult.postUrl,
+      referenceId: hppResult.referenceId,
+      amount,
+    });
+
+    // Página mínima que hace POST automático a Authorize.Net
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Redirigiendo al Pago Seguro...</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .box {
+      text-align: center;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #af100a;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="loader"></div>
+    <p>Redirigiendo a la plataforma de pago segura...</p>
+    <form id="payForm" method="POST" action="${hppResult.postUrl}">
+      <input type="hidden" name="token" value="${hppResult.token}" />
+      <noscript>
+        <button type="submit">Ir al Pago Seguro</button>
+      </noscript>
+    </form>
+  </div>
+  <script>
+    document.getElementById('payForm').submit();
+  </script>
+</body>
+</html>
+    `);
+  } catch (error) {
+    console.error("💥 Error en /pay-direct:", {
+      message: error.message,
+      responseStatus: error.response?.status,
+      responseData: error.response?.data,
+    });
+
+    res
+      .status(500)
+      .send("Error al iniciar el pago. Intenta nuevamente más tarde.");
   }
 });
 
@@ -1805,7 +2134,7 @@ app.get("/payment-success", (req, res) => {
         <p>El pago ha sido procesado correctamente a través de ${
           processor || "Authorize.Net"
         }.</p>
-        <p>Si el email fue suministrado, se ha enviado un comprobante con todos los detalles.</p>
+        <p>Se ha enviado un comprobante a tu email con todos los detalles.</p>
 
         ${
           amount
@@ -1833,7 +2162,7 @@ app.get("/payment-success", (req, res) => {
         }
 
         <p style="font-size: 12px; color: #6c757d;">
-            <strong>📧 Comprobante enviado (si se registró un email en el pago)</strong><br>
+            <strong>📧 Comprobante enviado a tu email</strong><br>
             Guarda este comprobante para tus registros.
         </p>
 
@@ -1844,7 +2173,7 @@ app.get("/payment-success", (req, res) => {
         <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid #e9ecef;">
             <p style="font-size: 11px; color: #6c757d;">
                 <strong>Ensurity Express Payments</strong><br>
-                Procesado por Authorize.Net (Accept.js)
+                Procesado por Authorize.Net
             </p>
         </div>
     </div>
@@ -1920,6 +2249,7 @@ app.get("/payment-cancelled", (req, res) => {
   `);
 });
 
+// Opcional: ruta de cancelación usada por Authorize.Net
 app.get("/authorize/cancel", (req, res) => {
   res.redirect("/payment-cancelled");
 });
@@ -1928,21 +2258,19 @@ app.get("/authorize/cancel", (req, res) => {
 // HEALTH CHECK
 // =====================================
 app.get("/health", (req, res) => {
-  const activeSessions = Array.from(paymentTokens.entries()).map(
-    ([k, v]) => ({
-      token: k.substring(0, 10) + "...",
-      entity: `${v.entityType}-${v.entityId}`,
-      email: v.contactEmail,
-      flowType: v.flowType || "unknown",
-      amount: v.dealAmount || "N/A",
-      authorizeReference: v.authorizeReferenceId || "No asignada",
-      expires: new Date(v.expires).toISOString(),
-    })
-  );
+  const activeSessions = Array.from(paymentTokens.entries()).map(([k, v]) => ({
+    token: k.substring(0, 10) + "...",
+    entity: `${v.entityType}-${v.entityId}`,
+    email: v.contactEmail,
+    flowType: v.flowType || "unknown",
+    amount: v.dealAmount || "N/A",
+    authorizeReference: v.authorizeReferenceId || "No asignada",
+    expires: new Date(v.expires).toISOString(),
+  }));
 
   res.json({
     status: "OK",
-    server: "Ensurity Express Payments con Authorize.Net (Accept.js) v2.0",
+    server: "Ensurity Express Payments con Authorize.Net v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
     endpoints: {
@@ -1953,7 +2281,7 @@ app.get("/health", (req, res) => {
       paymentSuccess: "GET /payment-success",
       sendEmail: "POST /api/send-payment-email",
       processPayment: "POST /api/process-payment",
-      payDirect: "GET /pay-direct",
+      generateAuthorizeLink: "POST /api/generate-authorize-link",
       authorizeReturn: "GET/POST /authorize/return",
       authorizeCancel: "GET /authorize/cancel",
       iframeCommunicator: "GET /iframe-communicator",
@@ -1963,7 +2291,6 @@ app.get("/health", (req, res) => {
       baseUrl: authorizeService.getBaseUrl(),
       hasApiLoginId: !!authorizeService.apiLoginId,
       hasTransactionKey: !!authorizeService.transactionKey,
-      hasClientKey: !!authorizeService.clientKey,
       apiLoginId: authorizeService.apiLoginId
         ? `${authorizeService.apiLoginId.substring(0, 4)}...`
         : "No configurado",
@@ -1977,6 +2304,77 @@ app.get("/health", (req, res) => {
       memory: process.memoryUsage(),
     },
   });
+});
+
+// =====================================
+// DEBUG HPP PRODUCCIÓN
+// =====================================
+app.post("/api/debug-hpp-production", async (req, res) => {
+  try {
+    console.log("🧪 DEBUG HPP PRODUCCIÓN INICIADO");
+
+    const testPayload = {
+      getHostedPaymentPageRequest: {
+        merchantAuthentication: {
+          name: process.env.AUTHORIZE_API_LOGIN_ID,
+          transactionKey: process.env.AUTHORIZE_TRACTION_KEY,
+        },
+        transactionRequest: {
+          transactionType: "authCaptureTransaction",
+          amount: "10.00",
+        },
+      },
+    };
+
+    console.log("📤 DEBUG - Enviando a PRODUCCIÓN:", {
+      url: "https://api.authorize.net/xml/v1/request.api",
+      payload: {
+        ...testPayload,
+        merchantAuthentication: { name: "***", transactionKey: "***" },
+      },
+    });
+
+    const response = await axios.post(
+      "https://api.authorize.net/xml/v1/request.api",
+      testPayload,
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 30000,
+      }
+    );
+
+    console.log(
+      "✅ DEBUG - Respuesta PRODUCCIÓN:",
+      JSON.stringify(response.data, null, 2)
+    );
+
+    if (response.data.token) {
+      const postUrl = "https://accept.authorize.net/payment/payment";
+
+      res.json({
+        success: true,
+        token: response.data.token,
+        postUrl: postUrl,
+        fullResponse: response.data,
+      });
+    } else {
+      throw new Error(
+        response.data.messages?.message?.[0]?.text || "No token received"
+      );
+    }
+  } catch (error) {
+    console.error("💥 DEBUG - Error PRODUCCIÓN:", {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      response: error.response?.data,
+    });
+  }
 });
 
 // =====================================
@@ -2033,15 +2431,15 @@ app.get("/widget/bitrix24", (req, res) => {
 // =====================================
 app.get("/", (req, res) => {
   res.json({
-    message: "Ensurity Express Payments API con Authorize.Net (Accept.js)",
-    version: "2.0",
+    message: "Ensurity Express Payments API con Authorize.Net",
+    version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
     endpoints: {
       health: "/health",
       widget: "/widget/bitrix24",
       payment: "/payment/{token}",
-      payDirect: "/pay-direct",
+      debugHpp: "/api/debug-hpp-production",
       documentation: "Ver /health para todos los endpoints",
     },
   });
@@ -2065,16 +2463,19 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(
-    `🚀 Servidor Ensurity Express Payments (Accept.js) ejecutándose en puerto ${PORT}`
+    `🚀 Servidor Ensurity Express Payments con Authorize.Net ejecutándose en puerto ${PORT}`
   );
   console.log(`🔗 URL Base: ${BASE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
   console.log(`💳 Pagos: GET ${BASE_URL}/payment/{token}`);
-  console.log(`💳 Pago directo: GET ${BASE_URL}/pay-direct`);
   console.log(`✅ Éxito: GET ${BASE_URL}/payment-success`);
   console.log(`📧 Email: POST ${BASE_URL}/api/send-payment-email`);
   console.log(`💳 Procesar: POST ${BASE_URL}/api/process-payment`);
+  console.log(
+    `🔗 Authorize Generate: POST ${BASE_URL}/api/generate-authorize-link`
+  );
+  console.log(`🔧 Debug HPP: POST ${BASE_URL}/api/debug-hpp-production`);
   console.log(`↩️  Authorize Return: GET/POST ${BASE_URL}/authorize/return`);
   console.log(`❌ Authorize Cancel: GET ${BASE_URL}/authorize/cancel`);
   console.log(`🖼️  Iframe Communicator: GET ${BASE_URL}/iframe-communicator`);
