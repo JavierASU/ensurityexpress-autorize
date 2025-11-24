@@ -38,6 +38,9 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan("combined"));
+app.use("/imagenes", express.static("imagenes"));
+const path = require("path");
+app.use("/imagenes", express.static(path.join(__dirname, "imagenes")));
 
 // =========================
 // CONFIG SMTP (desde .env)
@@ -1319,12 +1322,12 @@ app.get("/payment/:token", async (req, res) => {
   <div class="top-banner">
     <div class="banner-left">
       <!-- Cambia la URL del logo por la tuya -->
-      <img
-        class="banner-logo"
-        src="https://imagenes-egconnects.s3.us-east-1.amazonaws.com/ensurity+express/Ensurity.png"
-        alt="Ensurity Express Logo"
-      />
-      <div class="banner-title">
+   <img
+  class="banner-logo"
+  src="/imagenes/logo-blanco-ee.png"
+  alt="Ensurity Express Logo"
+/>
+ <div class="banner-title">
         <div class="banner-title-main">Ensurity Express Tax Solutions</div>
         <div class="banner-title-sub">Pago seguro con Authorize.Net</div>
       </div>
@@ -1422,7 +1425,6 @@ app.get("/payment/:token", async (req, res) => {
     `);
   }
 });
-
 
 // =====================================
 // API PARA ENVIAR EMAIL CON LINK DE PAGO
