@@ -1130,6 +1130,9 @@ app.post("/webhook/bitrix24", async (req, res) => {
 // =====================================
 // RUTA DE PAGO CON TOKEN (BANNER + IFRAME HPP)
 // =====================================
+// =====================================
+// RUTA DE PAGO CON TOKEN (BANNER + HPP EN IFRAME)
+// =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
 
@@ -1196,453 +1199,219 @@ app.get("/payment/:token", async (req, res) => {
       `✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail}) - Flujo: ${tokenData.flowType}`
     );
 
-    const isEmailFlow = tokenData.flowType === "email";
+    // Monto que se usará en el HPP (email, widget, web, etc.)
     const defaultAmount = tokenData.dealAmount || "20.80";
-    const allowAmountModification = !isEmailFlow;
 
-    const paymentForm = `
+    // 🌐 Página que muestra SOLO tu banner + iframe con el HPP
+    const html = `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ensurity Express - Pago Seguro</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f4f4f4;
-            margin: 0; padding: 20px;
-            min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .page-container {
-            width: 100%; max-width: 920px;
-            background: #ffffff;
-            border-radius: 16px;
-            box-shadow: 0 18px 40px rgba(0,0,0,0.12);
-            overflow: hidden;
-            border: 1px solid #e3e3e3;
-        }
-        .banner {
-            background: linear-gradient(90deg, #af100a 0%, #5b0000 50%, #000000 100%);
-            color: #ffffff;
-            padding: 18px 26px;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-        }
-        .banner-left {
-            display: flex; flex-direction: column;
-        }
-        .brand-name {
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-        }
-        .brand-sub {
-            font-size: 12px;
-            opacity: 0.9;
-        }
-        .banner-right {
-            text-align: right;
-            font-size: 11px;
-            line-height: 1.4;
-        }
-        .banner-right strong {
-            font-size: 12px;
-        }
-        .content {
-            padding: 22px 26px 26px 26px;
-            display: grid;
-            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
-            gap: 18px;
-        }
-        @media (max-width: 768px) {
-            .content {
-                grid-template-columns: 1fr;
-            }
-            .banner {
-                align-items: flex-start;
-            }
-            .banner-right {
-                text-align: left;
-            }
-        }
-        .summary-card {
-            background: #fafbfc;
-            border-radius: 12px;
-            padding: 16px 16px 18px 16px;
-            border: 1px solid #e5e7eb;
-        }
-        .summary-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #af100a;
-            margin-bottom: 8px;
-        }
-        .summary-line {
-            font-size: 13px;
-            color: #444;
-            margin-bottom: 6px;
-        }
-        .summary-line strong {
-            color: #111827;
-        }
-        .flow-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            background: #fee2e2;
-            color: #991b1b;
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-        .flow-chip.email {
-            background: #dbf5ff;
-            color: #065f46;
-        }
-        .form-section {
-            border-radius: 12px;
-            padding: 16px 16px 18px 16px;
-            border: 1px solid #e5e7eb;
-        }
-        .form-group {
-            margin-bottom: 14px;
-        }
-        label {
-            display: block;
-            font-size: 12px;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 4px;
-        }
-        input[type="number"] {
-            width: 100%;
-            padding: 10px 12px;
-            border-radius: 8px;
-            border: 2px solid #e5e7eb;
-            font-size: 16px;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        input[type="number"]:focus {
-            outline: none;
-            border-color: #af100a;
-            box-shadow: 0 0 0 3px rgba(175,16,10,0.15);
-        }
-        input[type="number"]:disabled {
-            background: #f3f4f6;
-            color: #6b7280;
-            cursor: not-allowed;
-        }
-        .amount-note {
-            font-size: 11px;
-            color: #6b7280;
-            margin-top: 3px;
-        }
-        .amount-note.fixed {
-            color: #065f46;
-            background: #ecfdf5;
-            border-radius: 6px;
-            padding: 6px 8px;
-            border: 1px solid #a7f3d0;
-        }
-        .btn-pay {
-            margin-top: 10px;
-            width: 100%;
-            border: none;
-            border-radius: 8px;
-            padding: 11px 16px;
-            font-size: 15px;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            cursor: pointer;
-            background: linear-gradient(90deg, #af100a 0%, #5b0000 50%, #000000 100%);
-            color: #ffffff;
-            box-shadow: 0 10px 22px rgba(0,0,0,0.25);
-            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
-        }
-        .btn-pay:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 14px 28px rgba(0,0,0,0.3);
-            opacity: 0.98;
-        }
-        .btn-pay:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-        .loader {
-            width: 18px;
-            height: 18px;
-            border-radius: 999px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #ffffff;
-            animation: spin 0.9s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        .security-box {
-            margin-top: 12px;
-            font-size: 11px;
-            color: #6b7280;
-            background: #fef2f2;
-            border-radius: 8px;
-            padding: 8px 10px;
-            border: 1px solid #fecaca;
-        }
-        .security-box strong {
-            color: #b91c1c;
-        }
-        .iframe-wrapper {
-            border-radius: 12px;
-            border: 1px solid #e5e7eb;
-            overflow: hidden;
-            background: #f9fafb;
-        }
-        iframe {
-            width: 100%;
-            border: none;
-            min-height: 480px;
-            background: transparent;
-        }
-        .iframe-header {
-            padding: 8px 12px;
-            font-size: 11px;
-            color: #4b5563;
-            background: #f3f4f6;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-        }
-        .iframe-header span {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .status-message {
-            margin-top: 10px;
-            font-size: 12px;
-            display: none;
-            padding: 8px 10px;
-            border-radius: 8px;
-        }
-        .status-message.success {
-            display: block;
-            background: #ecfdf5;
-            color: #065f46;
-            border: 1px solid #a7f3d0;
-        }
-        .status-message.error {
-            display: block;
-            background: #fef2f2;
-            color: #b91c1c;
-            border: 1px solid #fecaca;
-        }
-        .footer-note {
-            padding: 10px 26px 16px 26px;
-            font-size: 11px;
-            color: #9ca3af;
-            text-align: right;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <title>Ensurity Express - Pago Seguro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background: #ffffff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    /* 🟥 Banner superior tipo Invoice (no tocamos el HPP) */
+    .top-banner {
+      background-color: #5b0000;
+      color: #ffffff;
+      padding: 20px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .banner-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .banner-logo {
+      height: 48px;
+    }
+    .banner-title {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .banner-title-main {
+      font-size: 22px;
+      font-weight: 600;
+    }
+    .banner-title-sub {
+      font-size: 12px;
+    }
+    .banner-right {
+      text-align: right;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    /* Contenedor del iframe */
+    .iframe-wrapper {
+      flex: 1;
+      background: #f4f4f4;
+      padding: 20px 0;
+    }
+    .iframe-inner {
+      width: 100%;
+      max-width: 960px;
+      margin: 0 auto;
+      height: 100%;
+      background: #ffffff;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .loading-box {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #555;
+      font-size: 14px;
+    }
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #5b0000;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 10px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .error-box {
+      padding: 20px;
+      color: #721c24;
+      background: #f8d7da;
+      text-align: center;
+      font-size: 14px;
+    }
+    .error-box button {
+      margin-top: 10px;
+      background: #5b0000;
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+  </style>
 </head>
 <body>
-    <div class="page-container">
-        <div class="banner">
-            <div class="banner-left">
-                <div class="brand-name">Ensurity Express Tax Solutions</div>
-                <div class="brand-sub">Secure Payment Portal · Authorize.Net</div>
-            </div>
-            <div class="banner-right">
-                <div><strong>www.ensurityexpress.com</strong></div>
-                <div>Customer Support · Secure Online Payments</div>
-            </div>
-        </div>
-
-        <div class="content">
-            <div class="summary-card">
-                <div class="flow-chip ${
-                  isEmailFlow ? "email" : ""
-                }">${isEmailFlow ? "📧 Link enviado por email · Monto fijo" : "🔗 Link directo · Monto modificable"}</div>
-                <div class="summary-title">Resumen del pago</div>
-                <p class="summary-line"><strong>Cliente:</strong> ${
-                  tokenData.contactName
-                }</p>
-                <p class="summary-line"><strong>Email:</strong> ${
-                  tokenData.contactEmail
-                }</p>
-                <p class="summary-line"><strong>Referencia:</strong> ${(
-                  tokenData.entityType || "DEAL"
-                ).toUpperCase()}-${tokenData.entityId}</p>
-                <p class="summary-line"><strong>Monto sugerido:</strong> $${defaultAmount} USD</p>
-                <p class="summary-line"><strong>Entorno Authorize.Net:</strong> ${
-                  authorizeService.useSandbox
-                    ? "SANDBOX (Pruebas)"
-                    : "PRODUCCIÓN"
-                }</p>
-
-                <div class="security-box">
-                    <strong>🔒 Seguridad:</strong> el formulario de pago real se carga directamente desde los servidores seguros de Authorize.Net dentro del panel de la derecha. Ensurity Express nunca almacena los datos de tu tarjeta.
-                </div>
-            </div>
-
-            <div class="form-section">
-                <form id="paymentForm">
-                    <div class="form-group">
-                        <label for="amount">Monto a pagar (USD)</label>
-                        <input
-                            type="number"
-                            id="amount"
-                            name="amount"
-                            min="1"
-                            step="0.01"
-                            value="${defaultAmount}"
-                            ${allowAmountModification ? "" : "disabled"}
-                            required
-                        />
-                        ${
-                          allowAmountModification
-                            ? `<div class="amount-note">💡 Puedes ajustar este monto según la gestión acordada con tu agente.</div>`
-                            : `<div class="amount-note fixed">🔒 Este pago tiene un monto fijo de <strong>$${defaultAmount} USD</strong>, establecido previamente por tu agente.</div>`
-                        }
-                    </div>
-
-                    <button type="submit" class="btn-pay" id="submitBtn">
-                        <span id="btnText">💳 Ir al formulario de pago seguro</span>
-                        <div id="btnLoader" class="loader" style="display:none;"></div>
-                    </button>
-                </form>
-
-                <div id="statusMsg" class="status-message"></div>
-
-                <div class="security-box" style="margin-top: 10px;">
-                    Este botón abrirá el formulario oficial de Authorize.Net en el panel derecho. Completa allí los datos de tu tarjeta para finalizar el pago.
-                </div>
-            </div>
-        </div>
-
-        <div class="content" style="border-top: 1px solid #e5e7eb; padding-top: 18px;">
-            <div class="iframe-wrapper" style="grid-column: 1 / -1;">
-                <div class="iframe-header">
-                    <span>🧾 Formulario de pago seguro · Authorize.Net</span>
-                    <span>🔐 PCI Compliant · SSL Encrypted</span>
-                </div>
-                <iframe id="hppFrame" name="hppFrame" src="about:blank" allowtransparency="true">
-                    Su navegador no soporta iframes.
-                </iframe>
-            </div>
-        </div>
-
-        <div class="footer-note">
-            Ensurity Express Payments · Procesado por Authorize.Net
-        </div>
+  <!-- 🟥 Banner superior: aquí controlas logo/textos para que se vea igual a la imagen -->
+  <div class="top-banner">
+    <div class="banner-left">
+      <!-- Cambia la URL del logo por la tuya -->
+      <img
+        class="banner-logo"
+        src="https://imagenes-egconnects.s3.us-east-1.amazonaws.com/ensurity+express/Ensurity.png"
+        alt="Ensurity Express Logo"
+      />
+      <div class="banner-title">
+        <div class="banner-title-main">Ensurity Express Tax Solutions</div>
+        <div class="banner-title-sub">Pago seguro con Authorize.Net</div>
+      </div>
     </div>
+    <div class="banner-right">
+      935 W RALPH HALL PKWY 101, ROCKWALL, TX 75032<br/>
+      (469)321-1110
+    </div>
+  </div>
 
-    <script>
-        const TOKEN = '${token}';
-        const SERVER_URL = '${BASE_URL}';
+  <!-- Contenido del HPP dentro de un iframe -->
+  <div class="iframe-wrapper">
+    <div class="iframe-inner">
+      <div id="loadingBox" class="loading-box">
+        <div class="loader"></div>
+        <div>Preparando formulario de pago seguro...</div>
+        <div style="margin-top:6px; font-size:12px; color:#777;">
+          Monto: $${defaultAmount} USD
+        </div>
+      </div>
+      <iframe id="hppFrame" name="hppFrame"></iframe>
+    </div>
+  </div>
 
-        const form = document.getElementById('paymentForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const btnText = document.getElementById('btnText');
-        const btnLoader = document.getElementById('btnLoader');
-        const statusMsg = document.getElementById('statusMsg');
-        const amountInput = document.getElementById('amount');
+  <script>
+    const TOKEN = "${token}";
+    const SERVER_URL = "${BASE_URL}";
+    const AMOUNT = "${defaultAmount}";
 
-        function setStatus(type, html) {
-            statusMsg.className = 'status-message ' + type;
-            statusMsg.innerHTML = html;
-            statusMsg.style.display = 'block';
+    async function loadHpp() {
+      const loadingBox = document.getElementById("loadingBox");
+      try {
+        const response = await fetch(SERVER_URL + "/api/generate-authorize-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: TOKEN, amount: AMOUNT })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+          throw new Error(result.error || "No se pudo generar el link de pago.");
         }
 
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
+        // Creamos un form oculto que hace POST al HPP, apuntando al iframe
+        const form = document.createElement("form");
+        form.method = "POST";
+        form.action = result.postUrl;
+        form.target = "hppFrame";
+        form.style.display = "none";
 
-            const amount = amountInput.value;
-            if (!amount || parseFloat(amount) <= 0) {
-                setStatus('error', '❌ El monto debe ser mayor a 0.');
-                return;
-            }
+        const tokenInput = document.createElement("input");
+        tokenInput.type = "hidden";
+        tokenInput.name = "token";
+        tokenInput.value = result.token;
 
-            submitBtn.disabled = true;
-            btnText.style.display = 'none';
-            btnLoader.style.display = 'inline-block';
-            setStatus('success', '⏳ Generando sesión segura de pago en Authorize.Net...');
+        form.appendChild(tokenInput);
+        document.body.appendChild(form);
 
-            try {
-                const response = await fetch(SERVER_URL + '/api/generate-authorize-link', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        token: TOKEN,
-                        amount: amount
-                    })
-                });
+        // Enviamos el formulario al iframe
+        form.submit();
 
-                const result = await response.json();
-
-                if (!result.success) {
-                    throw new Error(result.error || 'No se pudo generar el link de pago.');
-                }
-
-                // Crear un form dinámico que haga POST del token al iframe
-                const payForm = document.createElement('form');
-                payForm.method = 'POST';
-                payForm.action = result.postUrl;
-                payForm.target = 'hppFrame';
-                payForm.style.display = 'none';
-
-                const tokenInput = document.createElement('input');
-                tokenInput.type = 'hidden';
-                tokenInput.name = 'token';
-                tokenInput.value = result.token;
-
-                payForm.appendChild(tokenInput);
-                document.body.appendChild(payForm);
-
-                setStatus('success', '✅ Sesión generada. Cargando el formulario seguro de Authorize.Net a la derecha...');
-
-                // Enviar el form hacia el iframe
-                payForm.submit();
-            } catch (error) {
-                console.error('Error al generar HPP:', error);
-                setStatus(
-                    'error',
-                    '❌ Ocurrió un error al generar la sesión de pago.<br>' +
-                    (error.message || '') +
-                    '<br><br><small>Si el problema persiste, contacta a soporte de Ensurity Express.</small>'
-                );
-            } finally {
-                submitBtn.disabled = false;
-                btnText.style.display = 'inline';
-                btnLoader.style.display = 'none';
-            }
+        // Ocultamos el loader cuando el iframe termina de cargar
+        const frame = document.getElementById("hppFrame");
+        frame.addEventListener("load", () => {
+          loadingBox.style.display = "none";
         });
 
-        // Listener opcional para mensajes del IFrame Communicator
-        window.addEventListener('message', function(event) {
-            if (event.data === 'iframeReady') {
-                console.log('🧩 Iframe communicator listo');
-            }
-        });
-    </script>
+      } catch (error) {
+        console.error("Error cargando HPP:", error);
+        loadingBox.innerHTML = \`
+          <div class="error-box">
+            <strong>❌ Error al cargar el formulario de pago</strong><br/>
+            \${error.message}<br/>
+            <button onclick="window.location.reload()">🔄 Reintentar</button>
+          </div>
+        \`;
+      }
+    }
+
+    window.addEventListener("load", loadHpp);
+  </script>
 </body>
 </html>
     `;
 
-    res.send(paymentForm);
+    res.send(html);
   } catch (error) {
     console.error("❌ Error en página de pago:", error);
     res.status(500).send(`
@@ -1653,6 +1422,7 @@ app.get("/payment/:token", async (req, res) => {
     `);
   }
 });
+
 
 // =====================================
 // API PARA ENVIAR EMAIL CON LINK DE PAGO
