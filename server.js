@@ -232,7 +232,7 @@ class AuthorizeNetService {
     }
   }
 
-  // Crear Hosted Payment Page (HPP) - ACTUALIZADO CON BRANDING ENSURITY
+  // Crear Hosted Payment Page (HPP)
   async createHostedPaymentPage(paymentData) {
     try {
       console.log('🔄 Creando página de pago hospedada...');
@@ -268,39 +268,28 @@ class AuthorizeNetService {
                 settingValue: JSON.stringify({
                   showReceipt: true,
                   url: `${BASE_URL}/authorize/return`,
-                  urlText: "Continuar",
+                  urlText: "Continue",
                   cancelUrl: `${BASE_URL}/authorize/cancel`,
-                  cancelUrlText: "Cancelar"
+                  cancelUrlText: "Cancel"
                 })
               },
               {
                 settingName: "hostedPaymentButtonOptions", 
                 settingValue: JSON.stringify({
-                  text: "Pagar Ahora"
+                  text: "Pay Now"
                 })
               },
               {
                 settingName: "hostedPaymentStyleOptions",
                 settingValue: JSON.stringify({
-                  bgColor: "#041539",           // Fondo principal azul oscuro Ensurity
-                  headerBgColor: "#af100a",     // Encabezado rojo Ensurity
-                  buttonBgColor: "#af100a",     // Botones rojos
-                  buttonTextColor: "#ffffff",   // Texto blanco en botones
-                  textColor: "#000000",         // Texto principal negro
-                  linkColor: "#af100a",         // Enlaces rojos
-                  footerTextColor: "#ffffff",   // Texto pie de página blanco
-                  footerBgColor: "#041539",     // Fondo pie de página azul
-                  borderColor: "#af100a",       // Bordes rojos
-                  fontFamily: "Arial, sans-serif",
-                  fontSize: "14px"
+                  bgColor: "#041539"
                 })
               },
               {
                 settingName: "hostedPaymentPaymentOptions",
                 settingValue: JSON.stringify({
                   cardCodeRequired: true,
-                  showCreditCard: true,
-                  showBankAccount: false
+                  showCreditCard: true
                 })
               },
               {
@@ -316,19 +305,6 @@ class AuthorizeNetService {
                   showEmail: false,
                   requiredEmail: false,
                   addPaymentProfile: false
-                })
-              },
-              {
-                settingName: "hostedPaymentOrderOptions",
-                settingValue: JSON.stringify({
-                  show: true,
-                  merchantName: "Ensurity Express"
-                })
-              },
-              {
-                settingName: "hostedPaymentIFrameCommunicatorUrl",
-                settingValue: JSON.stringify({
-                  url: `${BASE_URL}/iframe-communicator`
                 })
               }
             ]
@@ -410,6 +386,7 @@ class AuthorizeNetService {
     }
   }
 }
+
 
 // =====================================
 // CLASE Bitrix24
@@ -530,7 +507,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
     }
 
     const mailOptions = {
-      from: `"Ensurity Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
+      from: `"EG Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
       to: email,
       subject: `Link de Pago - Deal #${dealId}`,
       html: `
@@ -553,13 +530,13 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
 </head>
 <body>
     <div class="header">
-        <h1>Ensurity Express Payments</h1>
+        <h1>EG Express Payments</h1>
         <p>Sistema de Pagos Seguro con Authorize.Net</p>
     </div>
 
     <div class="content">
         <p>Hola <strong>${clientName}</strong>,</p>
-        <p>Has recibido un link de pago seguro para completar tu transacción con <span class="brand">Ensurity Express</span>.</p>
+        <p>Has recibido un link de pago seguro para completar tu transacción con <span class="brand">EG Express</span>.</p>
 
         <div class="amount-info">
             <p><strong>Referencia:</strong> Deal #${dealId}</p>
@@ -585,7 +562,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
     </div>
 
     <div class="footer">
-        <p>Ensurity Express Payments System<br>
+        <p>EG Express Payments System<br>
         <small>Este es un email automático, por favor no respondas a este mensaje.</small></p>
     </div>
 </body>
@@ -605,7 +582,7 @@ async function sendPaymentEmail(email, clientName, paymentLink, dealId, amount =
 async function sendPaymentConfirmation(email, paymentData) {
   try {
     const mailOptions = {
-      from: `"Ensurity Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
+      from: `"EG Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
       to: email,
       subject: `✅ Confirmación de Pago - ${paymentData.transactionId}`,
       html: `
@@ -624,7 +601,7 @@ async function sendPaymentConfirmation(email, paymentData) {
 <body>
     <div class="header">
         <h1>✅ Pago Confirmado</h1>
-        <p>Ensurity Express Payments</p>
+        <p>EG Express Payments</p>
     </div>
 
     <div class="content">
@@ -644,11 +621,11 @@ async function sendPaymentConfirmation(email, paymentData) {
 
         <p>Hemos registrado tu pago en nuestro sistema. Este comprobante sirve como recibo oficial.</p>
 
-        <p><strong>Gracias por confiar en Ensurity Express.</strong></p>
+        <p><strong>Gracias por confiar en EG Express.</strong></p>
     </div>
 
     <div class="footer">
-        <p>Ensurity Express Payments System<br>
+        <p>EG Express Payments System<br>
         <small>Este es un email automático, por favor no respondas a este mensaje.</small></p>
     </div>
 </body>
@@ -664,43 +641,6 @@ async function sendPaymentConfirmation(email, paymentData) {
     throw error;
   }
 }
-
-// =====================================
-// COMUNICADOR IFRAME PARA AUTHORIZE.NET
-// =====================================
-app.get("/iframe-communicator", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Ensurity Express - Comunicador de Pago</title>
-    <script type="text/javascript">
-        function callParentFunction(str) {
-            if (parent && parent.message) {
-                parent.message(str);
-            }
-        }
-        
-        function receiveMessage(event) {
-            if (event.data === "resize") {
-                callParentFunction("resize");
-            }
-        }
-        
-        window.addEventListener("message", receiveMessage, false);
-        
-        // Notificar que el iframe está listo
-        if (window.parent !== window) {
-            window.parent.postMessage("iframeReady", "*");
-        }
-    </script>
-</head>
-<body>
-    <p>Comunicador de pago Ensurity Express</p>
-</body>
-</html>
-  `);
-});
 
 // =====================================
 // RUTA PRINCIPAL DEL WIDGET BITRIX24
@@ -756,7 +696,7 @@ app.post("/widget/bitrix24", async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Ensurity Express Payments</title>
+            <title>EG Express Payments</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -776,7 +716,7 @@ app.post("/widget/bitrix24", async (req, res) => {
         <body>
             <div class="widget-container">
                 <div class="header">
-                    <h2>Ensurity Express Payments</h2>
+                    <h2>EG Express Payments</h2>
                     <p>Sistema de pagos con Authorize.Net</p>
                 </div>
                 <div class="content">
@@ -816,7 +756,7 @@ app.post("/widget/bitrix24", async (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ensurity Express Payments</title>
+    <title>EG Express Payments</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -847,7 +787,7 @@ app.post("/widget/bitrix24", async (req, res) => {
 <body>
     <div class="widget-container">
         <div class="header">
-            <h2>Ensurity Express Payments</h2>
+            <h2>EG Express Payments</h2>
             <p>Sistema de pagos con Authorize.Net</p>
         </div>
 
@@ -1142,7 +1082,7 @@ app.get("/payment/:token", async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Link Inválido - Ensurity Express</title>
+            <title>Link Inválido - EG Express</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -1170,7 +1110,7 @@ app.get("/payment/:token", async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Link Expirado - Ensurity Express</title>
+            <title>Link Expirado - EG Express</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -1203,7 +1143,7 @@ app.get("/payment/:token", async (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Redirigiendo al Pago Seguro - Ensurity Express</title>
+    <title>Redirigiendo al Pago Seguro - EG Express</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
@@ -1310,7 +1250,7 @@ app.get("/payment/:token", async (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ensurity Express - Portal de Pagos Seguro</title>
+    <title>EG Express - Portal de Pagos Seguro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1397,7 +1337,7 @@ app.get("/payment/:token", async (req, res) => {
     <div class="payment-container">
         <div class="payment-header">
             <h1>Portal de pagos seguro</h1>
-            <p>Ensurity Express · Procesado con Authorize.Net</p>
+            <p>EG Express · Procesado con Authorize.Net</p>
         </div>
 
         <div class="payment-content">
@@ -1907,6 +1847,7 @@ app.post("/authorize/return", async (req, res) => {
   }
 });
 
+
 // =====================================
 // PAGO DIRECTO DESDE WEB (SIN EMAIL / SIN PÁGINA INTERMEDIA)
 // =====================================
@@ -2042,6 +1983,7 @@ app.get("/pay-direct", async (req, res) => {
   }
 });
 
+
 // =====================================
 // RUTA DE ÉXITO DE PAGO
 // =====================================
@@ -2054,7 +1996,7 @@ app.get("/payment-success", (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Exitoso - Ensurity Express</title>
+    <title>Pago Exitoso - EG Express</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -2120,7 +2062,7 @@ app.get("/payment-success", (req, res) => {
 
         <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid #e9ecef;">
             <p style="font-size: 11px; color: #6c757d;">
-                <strong>Ensurity Express Payments</strong><br>
+                <strong>EG Express Payments</strong><br>
                 Procesado por Authorize.Net
             </p>
         </div>
@@ -2152,7 +2094,7 @@ app.get("/payment-failed", (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Fallido - Ensurity Express</title>
+    <title>Pago Fallido - EG Express</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -2178,7 +2120,7 @@ app.get("/payment-cancelled", (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Cancelado - Ensurity Express</title>
+    <title>Pago Cancelado - EG Express</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -2218,7 +2160,7 @@ app.get("/health", (req, res) => {
 
   res.json({
     status: "OK",
-    server: "Ensurity Express Payments con Authorize.Net v1.0",
+    server: "EG Express Payments con Authorize.Net v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
     endpoints: {
@@ -2231,8 +2173,7 @@ app.get("/health", (req, res) => {
       processPayment: "POST /api/process-payment",
       generateAuthorizeLink: "POST /api/generate-authorize-link",
       authorizeReturn: "GET/POST /authorize/return",
-      authorizeCancel: "GET /authorize/cancel",
-      iframeCommunicator: "GET /iframe-communicator"
+      authorizeCancel: "GET /authorize/cancel"
     },
     authorize: {
       environment: authorizeService.useSandbox ? "SANDBOX" : "PRODUCTION",
@@ -2263,7 +2204,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
       getHostedPaymentPageRequest: {
         merchantAuthentication: {
           name: process.env.AUTHORIZE_API_LOGIN_ID,
-          transactionKey: process.env.AUTHORIZE_TRACTION_KEY
+          transactionKey: process.env.AUTHORIZE_TRANSACTION_KEY
         },
         transactionRequest: {
           transactionType: "authCaptureTransaction",
@@ -2370,7 +2311,7 @@ app.get("/widget/bitrix24", (req, res) => {
 // =====================================
 app.get("/", (req, res) => {
   res.json({
-    message: "Ensurity Express Payments API con Authorize.Net",
+    message: "EG Express Payments API con Authorize.Net",
     version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
@@ -2401,7 +2342,7 @@ app.use((err, req, res, next) => {
 // =====================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Ensurity Express Payments con Authorize.Net ejecutándose en puerto ${PORT}`);
+  console.log(`🚀 Servidor EG Express Payments con Authorize.Net ejecutándose en puerto ${PORT}`);
   console.log(`🔗 URL Base: ${BASE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
@@ -2413,7 +2354,6 @@ app.listen(PORT, () => {
   console.log(`🔧 Debug HPP: POST ${BASE_URL}/api/debug-hpp-production`);
   console.log(`↩️  Authorize Return: GET/POST ${BASE_URL}/authorize/return`);
   console.log(`❌ Authorize Cancel: GET ${BASE_URL}/authorize/cancel`);
-  console.log(`🖼️  Iframe Communicator: GET ${BASE_URL}/iframe-communicator`);
   console.log(`❤️  Health: GET ${BASE_URL}/health`);
   console.log(`🏦 Authorize.Net: ${authorizeService.useSandbox ? 'SANDBOX' : 'PRODUCTION'} - ${authorizeService.getBaseUrl()}`);
 });
