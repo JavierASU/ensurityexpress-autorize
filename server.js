@@ -652,6 +652,571 @@ async function sendPaymentConfirmation(email, paymentData) {
 }
 
 // =====================================
+// NUEVO: FORMULARIO PERSONALIZADO VIA IFRAME
+// =====================================
+app.get("/iframe-payment/:token", (req, res) => {
+  const { token } = req.params;
+  
+  console.log(`🎨 Cargando formulario personalizado via iframe para token: ${token.substring(0, 10)}...`);
+
+  const tokenData = paymentTokens.get(token);
+  
+  if (!tokenData) {
+    return res.status(404).send(`
+      <div style="padding: 40px; text-align: center; background: white; border-radius: 10px;">
+        <h2 style="color: #af100a;">❌ Link Inválido</h2>
+        <p>Este link de pago ha expirado o es inválido.</p>
+      </div>
+    `);
+  }
+
+  const amount = tokenData.dealAmount || "1.00";
+  const clientName = tokenData.contactName || "Cliente";
+  const entityId = tokenData.entityId || "N/A";
+
+  const personalizedForm = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ensurity Express - Payment Form</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .payment-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+            max-width: 800px;
+            width: 100%;
+        }
+        
+        .ensurity-header {
+            background: linear-gradient(135deg, #af100a 0%, #5b0000 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .ensurity-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ffd700, #ffed4e, #ffd700);
+        }
+        
+        .ensurity-logo {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+        
+        .ensurity-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+        
+        .ensurity-address {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+        
+        .ensurity-phone {
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: bold;
+        }
+        
+        .invoice-section {
+            background: #f8f9fa;
+            padding: 25px 30px;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .invoice-title {
+            color: #af100a;
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .amount-display {
+            background: white;
+            border: 3px solid #af100a;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            margin: 15px 0;
+        }
+        
+        .amount-label {
+            font-size: 14px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        
+        .amount-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: #af100a;
+        }
+        
+        .payment-form {
+            padding: 30px;
+        }
+        
+        .form-section {
+            margin-bottom: 25px;
+        }
+        
+        .section-title {
+            color: #af100a;
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #af100a;
+            box-shadow: 0 0 0 3px rgba(175, 16, 10, 0.1);
+        }
+        
+        .card-group {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 15px;
+        }
+        
+        .button-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        
+        .btn {
+            padding: 15px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+        
+        .btn-pay {
+            background: linear-gradient(135deg, #af100a 0%, #5b0000 100%);
+            color: white;
+        }
+        
+        .btn-pay:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(175, 16, 10, 0.3);
+        }
+        
+        .btn-cancel {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-cancel:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+        
+        .security-notice {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #0066cc;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #af100a;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .result-message {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+            display: none;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .card-group {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                grid-template-columns: 1fr;
+            }
+            
+            .payment-container {
+                margin: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="payment-container">
+        <!-- Header con branding de Ensurity Express -->
+        <div class="ensurity-header">
+            <div class="ensurity-logo">ENSURITY EXPRESS TAX SOLUTIONS</div>
+            <div class="ensurity-subtitle">Secure Payment Processing</div>
+            <div class="ensurity-address">935 W RALPH HALL PKWY 101, ROCKWALL, TX 75032</div>
+            <div class="ensurity-phone">(469)321-1110</div>
+        </div>
+        
+        <!-- Sección de Invoice -->
+        <div class="invoice-section">
+            <div class="invoice-title">Invoice Details</div>
+            <div class="amount-display">
+                <div class="amount-label">Amount Due</div>
+                <div class="amount-value">$${amount} USD</div>
+            </div>
+        </div>
+        
+        <!-- Formulario de Pago -->
+        <div class="payment-form">
+            <form id="paymentForm">
+                <!-- Información de Tarjeta -->
+                <div class="form-section">
+                    <div class="section-title">Card Information</div>
+                    <div class="card-group">
+                        <div class="form-group">
+                            <label for="cardNumber">Card Number</label>
+                            <input type="text" id="cardNumber" name="cardNumber" 
+                                   placeholder="1234 5678 9012 3456" maxlength="19" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="expiry">Exp. Date</label>
+                            <input type="text" id="expiry" name="expiry" 
+                                   placeholder="MM/YY" maxlength="5" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="cvv">Card Code</label>
+                            <input type="text" id="cvv" name="cvv" 
+                                   placeholder="123" maxlength="4" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Información de Facturación -->
+                <div class="form-section">
+                    <div class="section-title">Billing Address</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="firstName">First Name</label>
+                            <input type="text" id="firstName" name="firstName" 
+                                   value="${clientName.split(' ')[0] || ''}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="lastName">Last Name</label>
+                            <input type="text" id="lastName" name="lastName" 
+                                   value="${clientName.split(' ').slice(1).join(' ') || ''}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="country">Country</label>
+                            <select id="country" name="country" required>
+                                <option value="USA" selected>USA</option>
+                                <option value="CAN">Canada</option>
+                                <option value="MEX">Mexico</option>
+                                <option value="OTHER">Other</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="zipCode">Zip Code</label>
+                            <input type="text" id="zipCode" name="zipCode" required>
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="streetAddress">Street Address</label>
+                            <input type="text" id="streetAddress" name="streetAddress" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="city">City</label>
+                            <input type="text" id="city" name="city" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="state">State</label>
+                            <input type="text" id="state" name="state" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="tel" id="phone" name="phone" required>
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="email">Email</label>
+                            <input type="email" id="email" name="email" 
+                                   value="${tokenData.contactEmail || ''}" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Mensajes de resultado -->
+                <div id="resultMessage" class="result-message"></div>
+                
+                <!-- Botones de acción -->
+                <div class="button-group">
+                    <button type="submit" class="btn btn-pay" id="submitBtn">
+                        <span id="btnText">Pay $${amount}</span>
+                        <div id="btnLoading" class="loading" style="display: none;"></div>
+                    </button>
+                    <button type="button" class="btn btn-cancel" onclick="cancelPayment()">
+                        Cancel
+                    </button>
+                </div>
+                
+                <!-- Nota de seguridad -->
+                <div class="security-notice">
+                    🔒 Your payment is secure and encrypted. Processed by Authorize.Net
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const TOKEN = '${token}';
+        const SERVER_URL = '${BASE_URL}';
+        const AMOUNT = '${amount}';
+        const ENTITY_ID = '${entityId}';
+
+        // Formatear número de tarjeta
+        document.getElementById('cardNumber').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+            let formattedValue = value.match(/.{1,4}/g)?.join(' ') || value;
+            e.target.value = formattedValue;
+        });
+
+        // Formatear fecha de expiración
+        document.getElementById('expiry').addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+            if (value.length >= 2) {
+                value = value.substring(0, 2) + '/' + value.substring(2, 4);
+            }
+            e.target.value = value;
+        });
+
+        // Solo números para CVV
+        document.getElementById('cvv').addEventListener('input', function(e) {
+            e.target.value = e.target.value.replace(/[^0-9]/gi, '');
+        });
+
+        // Manejar envío del formulario
+        document.getElementById('paymentForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnLoading = document.getElementById('btnLoading');
+            const resultMessage = document.getElementById('resultMessage');
+
+            // Mostrar loading
+            submitBtn.disabled = true;
+            btnText.style.display = 'none';
+            btnLoading.style.display = 'inline-block';
+            resultMessage.style.display = 'none';
+
+            // Obtener datos del formulario
+            const formData = {
+                token: TOKEN,
+                amount: AMOUNT,
+                cardNumber: document.getElementById('cardNumber').value.replace(/\s+/g, ''),
+                expiry: document.getElementById('expiry').value,
+                cvv: document.getElementById('cvv').value,
+                cardName: document.getElementById('firstName').value + ' ' + document.getElementById('lastName').value,
+                customerName: document.getElementById('firstName').value + ' ' + document.getElementById('lastName').value,
+                customerEmail: document.getElementById('email').value,
+                entityId: ENTITY_ID,
+                entityType: 'deal'
+            };
+
+            try {
+                console.log('Procesando pago...', formData);
+
+                const response = await fetch(SERVER_URL + '/api/process-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    resultMessage.innerHTML = 
+                        '✅ <strong>Pago procesado exitosamente!</strong><br>' +
+                        'Transaction ID: ' + result.transactionId + '<br>' +
+                        'Se ha enviado un comprobante a tu email.';
+                    resultMessage.className = 'result-message success';
+                    resultMessage.style.display = 'block';
+                    
+                    // Deshabilitar el formulario
+                    submitBtn.disabled = true;
+                    btnText.textContent = 'Payment Completed';
+                    
+                    // Notificar al padre si está en iframe
+                    if (window.parent !== window) {
+                        window.parent.postMessage({
+                            type: 'PAYMENT_SUCCESS',
+                            transactionId: result.transactionId,
+                            amount: AMOUNT
+                        }, '*');
+                    }
+                    
+                } else {
+                    throw new Error(result.error || 'Error processing payment');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                resultMessage.innerHTML = 
+                    '❌ <strong>Error processing payment</strong><br>' +
+                    error.message + '<br><br>' +
+                    '<button onclick="resetForm()" style="background: #af100a; color: white; padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px;">Try Again</button>';
+                resultMessage.className = 'result-message error';
+                resultMessage.style.display = 'block';
+                
+                // Re-enable button
+                submitBtn.disabled = false;
+                btnText.style.display = 'inline';
+                btnLoading.style.display = 'none';
+            }
+        });
+
+        function cancelPayment() {
+            if (window.parent !== window) {
+                window.parent.postMessage({
+                    type: 'PAYMENT_CANCELLED'
+                }, '*');
+            }
+            // Opcional: redirigir o cerrar el iframe
+            document.body.innerHTML = '<div style="padding: 40px; text-align: center;"><h3>Payment Cancelled</h3></div>';
+        }
+
+        function resetForm() {
+            document.getElementById('resultMessage').style.display = 'none';
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnLoading = document.getElementById('btnLoading');
+            
+            submitBtn.disabled = false;
+            btnText.style.display = 'inline';
+            btnLoading.style.display = 'none';
+        }
+
+        // Auto-llenar USA como país por defecto
+        document.getElementById('country').value = 'USA';
+
+        // Notificar al padre que el iframe está listo
+        if (window.parent !== window) {
+            window.parent.postMessage({
+                type: 'IFRAME_READY',
+                token: TOKEN,
+                amount: AMOUNT
+            }, '*');
+        }
+    </script>
+</body>
+</html>
+  `;
+
+  res.send(personalizedForm);
+});
+
+// =====================================
 // COMUNICADOR IFRAME PARA AUTHORIZE.NET
 // =====================================
 app.get("/iframe-communicator", (req, res) => {
@@ -830,6 +1395,7 @@ app.post("/widget/bitrix24", async (req, res) => {
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .email-section { background: #ffeaea; padding: 10px; border-radius: 6px; margin: 10px 0; border: 1px solid #ffcdd2; }
         .amount-info { background: #f8f9fa; padding: 8px; border-radius: 5px; margin: 8px 0; border-left: 3px solid #af100a; }
+        .iframe-option { background: #e7f3ff; padding: 10px; border-radius: 6px; margin: 8px 0; border: 1px solid #b3d9ff; }
     </style>
 </head>
 <body>
@@ -872,8 +1438,17 @@ app.post("/widget/bitrix24", async (req, res) => {
                 }
             </div>
 
+            <!-- NUEVA OPCIÓN: Formulario Personalizado via Iframe -->
+            <div class="iframe-option">
+                <h4 style="color: #0066cc; margin-bottom: 8px;">🎨 Formulario Personalizado</h4>
+                <p style="font-size: 11px; margin-bottom: 8px;">Formulario con branding de Ensurity Express (como la imagen)</p>
+                <button class="btn" onclick="generateIframePayment()" style="background: linear-gradient(90deg, #0066cc 0%, #004499 100%);">
+                    🎯 Generar formulario personalizado
+                </button>
+            </div>
+
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generar link de pago Authorize.Net
+                🔗 Generar link de pago Authorize.Net
             </button>
 
             <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
@@ -895,6 +1470,74 @@ app.post("/widget/bitrix24", async (req, res) => {
         const ENTITY_ID = '${entityId}';
         const ENTITY_TYPE = '${entityType}';
         const DEAL_AMOUNT = '${dealAmount || "20.80"}';
+
+        // NUEVA FUNCIÓN: Generar formulario personalizado via iframe
+        async function generateIframePayment() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>⏳ Generando formulario personalizado...</div>';
+            resultDiv.className = 'result';
+
+            try {
+                const response = await fetch(SERVER_URL + '/webhook/bitrix24', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        PLACEMENT_OPTIONS: JSON.stringify({
+                            ENTITY_ID: ENTITY_ID,
+                            ENTITY_TYPE: ENTITY_TYPE,
+                            CONTACT_EMAIL: CLIENT_EMAIL,
+                            CONTACT_NAME: CLIENT_NAME,
+                            DEAL_AMOUNT: DEAL_AMOUNT
+                        })
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const iframeHtml = \`
+                        <div style="border: 2px solid #af100a; border-radius: 10px; overflow: hidden; margin: 10px 0;">
+                            <iframe 
+                                src="\${SERVER_URL}/iframe-payment/\${result.paymentLink.split('/').pop()}" 
+                                width="100%" 
+                                height="600" 
+                                frameborder="0"
+                                style="border: none;"
+                                onload="resizeIframe(this)"
+                            ></iframe>
+                        </div>
+                        <div style="margin-top: 10px; padding: 8px; background: #e7f3ff; border-radius: 5px; font-size: 11px; color: #0066cc;">
+                            💡 Formulario personalizado con branding de Ensurity Express. El cliente puede pagar directamente aquí.
+                        </div>
+                    \`;
+                    
+                    resultDiv.innerHTML = 
+                        '<div style="color: #0066cc; text-align: center;">' +
+                        '✅ <strong>Formulario personalizado generado</strong></div><br>' +
+                        iframeHtml +
+                        '<button class="btn" onclick="copyIframeCode(\\'' + result.paymentLink + '\\')" style="margin-top: 10px; background: #343a40;">📋 Copiar código iframe</button>';
+                    resultDiv.className = 'result success';
+                } else {
+                    throw new Error(result.error || 'Error generando formulario');
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error:</strong> ' + (result.error || 'Error generando formulario') + '</div>';
+                resultDiv.className = 'result error';
+            }
+        }
+
+        function resizeIframe(iframe) {
+            iframe.style.height = iframe.contentWindow.document.body.scrollHeight + 'px';
+        }
+
+        function copyIframeCode(paymentLink) {
+            const token = paymentLink.split('/').pop();
+            const iframeCode = \`<iframe src="\${SERVER_URL}/iframe-payment/\${token}" width="100%" height="600" frameborder="0" style="border: none; border-radius: 10px;"></iframe>\`;
+            
+            navigator.clipboard.writeText(iframeCode).then(() => {
+                alert('✅ Código iframe copiado al portapapeles');
+            });
+        }
 
         async function generatePaymentLink() {
             const resultDiv = document.getElementById('result');
@@ -982,7 +1625,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 }
             } catch (error) {
                 resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error de conexión:</strong> ' + error.message + '</div>';
-                resultDiv.className = 'result error';
+                    resultDiv.className = 'result error';
             }
         }
 
@@ -2278,6 +2921,7 @@ app.get("/health", (req, res) => {
       webhook: "POST /webhook/bitrix24",
       health: "GET /health",
       payment: "GET /payment/:token",
+      iframePayment: "GET /iframe-payment/:token",
       paymentSuccess: "GET /payment-success",
       sendEmail: "POST /api/send-payment-email",
       processPayment: "POST /api/process-payment",
@@ -2439,6 +3083,7 @@ app.get("/", (req, res) => {
       health: "/health",
       widget: "/widget/bitrix24",
       payment: "/payment/{token}",
+      iframePayment: "/iframe-payment/{token}",
       debugHpp: "/api/debug-hpp-production",
       documentation: "Ver /health para todos los endpoints",
     },
@@ -2469,6 +3114,7 @@ app.listen(PORT, () => {
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
   console.log(`💳 Pagos: GET ${BASE_URL}/payment/{token}`);
+  console.log(`🎨 Iframe Personalizado: GET ${BASE_URL}/iframe-payment/{token}`);
   console.log(`✅ Éxito: GET ${BASE_URL}/payment-success`);
   console.log(`📧 Email: POST ${BASE_URL}/api/send-payment-email`);
   console.log(`💳 Procesar: POST ${BASE_URL}/api/process-payment`);
