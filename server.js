@@ -542,19 +542,19 @@ async function sendPaymentEmail(
 <body>
     <div class="header">
         <h1>Ensurity Express Payments</h1>
-        <p>Sistema de Pagos Seguro con Authorize.Net</p>
+        <p>Secure Payment System with Authorize.Net</p>
     </div>
 
     <div class="content">
-        <p>Hola <strong>${clientName}</strong>,</p>
-        <p>Has recibido un link de pago seguro para completar tu transacción con <span class="brand">Ensurity Express</span>.</p>
+        <p>Hello <strong>${clientName}</strong>,</p>
+        <p>You have received a secure payment link to complete your transaction with <span class="brand">Ensurity Express</span>.</p>
 
         <div class="amount-info">
-            <p><strong>Referencia:</strong> Deal #${dealId}</p>
-            <p><strong>Monto a pagar:</strong> <strong>$${dealAmount} USD</strong></p>
+            <p><strong>Reference:</strong> Customer:${dealId}</p>
+            <p><strong>Amount to pay:</strong> <strong>$${dealAmount} USD</strong></p>
         </div>
 
-        <p>Para completar tu pago, haz clic en el siguiente botón. Serás enviado directamente al portal seguro de pagos de Authorize.Net:</p>
+        <p>To complete your payment, click the button below. You will be taken directly to the secure payment portal of Authorize.Net:</p>
 
         <div style="text-align: center; margin: 24px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
@@ -562,14 +562,14 @@ async function sendPaymentEmail(
             </a>
         </div>
 
-        <p><strong>Importante:</strong></p>
+        <p><strong>Important:</strong></p>
         <ul>
-            <li>Este link es válido por 24 horas.</li>
-            <li>El monto de <strong>$${dealAmount} USD</strong> está fijado para esta transacción.</li>
-            <li>El pago se procesa a través de Authorize.Net en un entorno cifrado.</li>
+            <li>This link is valid for 24 hours.</li>
+            <li>The amount of <strong>$${dealAmount} USD</strong> is fixed for this transaction.</li>
+            <li>Payment is processed through Authorize.Net in an encrypted environment.</li>
         </ul>
 
-        <p>Si tienes alguna pregunta, por favor contáctanos.</p>
+        <p>If you have any questions, please contact us.</p>
         <p style="text-align: center;">
 Ensurity Express Tax Solutions<br>
 935 W RALPH HALL PKWY 101<br>
