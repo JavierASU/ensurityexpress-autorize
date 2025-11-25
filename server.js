@@ -520,7 +520,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `Link de Pago - Deal #${dealId}`,
+      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Deal #${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -558,7 +558,7 @@ async function sendPaymentEmail(
 
         <div style="text-align: center; margin: 24px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
-                💳 Ir al Pago Seguro
+                💳 VIEW AND PAY INVOICE
             </a>
         </div>
 
@@ -570,6 +570,12 @@ async function sendPaymentEmail(
         </ul>
 
         <p>Si tienes alguna pregunta, por favor contáctanos.</p>
+        <p style="text-align: center;">
+Ensurity Express Tax Solutions<br>
+935 W RALPH HALL PKWY 101<br>
+ROCKWALL TX, 75032<br>
+469-4847873<br>
+.</p>
     </div>
 
     <div class="footer">
@@ -1329,12 +1335,12 @@ app.get("/payment/:token", async (req, res) => {
 />
  <div class="banner-title">
         <div class="banner-title-main">Ensurity Express Tax Solutions</div>
-        <div class="banner-title-sub">Pago seguro con Authorize.Net</div>
+        <div class="banner-title-sub">Processed with Authorize.net</div>
       </div>
     </div>
     <div class="banner-right">
       935 W RALPH HALL PKWY 101, ROCKWALL, TX 75032<br/>
-      (469)321-1110
+      (469)484-7873
     </div>
   </div>
 
