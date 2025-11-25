@@ -520,7 +520,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Deal #${clientName}`,
+      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer:${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -550,7 +550,7 @@ async function sendPaymentEmail(
         <p>You have received a secure payment link to complete your transaction with <span class="brand">Ensurity Express</span>.</p>
 
         <div class="amount-info">
-            <p><strong>Reference:</strong> Customer:${dealId}</p>
+            <p><strong>Reference:</strong> Customer:${clientName}</p>
             <p><strong>Amount to pay:</strong> <strong>$${dealAmount} USD</strong></p>
         </div>
 
@@ -1349,9 +1349,9 @@ app.get("/payment/:token", async (req, res) => {
     <div class="iframe-inner">
       <div id="loadingBox" class="loading-box">
         <div class="loader"></div>
-        <div>Preparando formulario de pago seguro...</div>
+        <div>Preparing secure payment form...</div>
         <div style="margin-top:6px; font-size:12px; color:#777;">
-          Monto: $${defaultAmount} USD
+          Amount: $${defaultAmount} USD
         </div>
       </div>
       <iframe id="hppFrame" name="hppFrame"></iframe>
