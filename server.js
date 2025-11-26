@@ -520,7 +520,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer:${clientName}`,
+      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer: ${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -580,7 +580,7 @@ ROCKWALL TX, 75032<br>
 
     <div class="footer">
         <p>Ensurity Express Payments System<br>
-        <small>Este es un email automático, por favor no respondas a este mensaje.</small></p>
+        <small>This is an automated email, please do not reply to this message.</small></p>
     </div>
 </body>
 </html>
@@ -603,7 +603,7 @@ async function sendPaymentConfirmation(email, paymentData) {
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `✅ Confirmación de Pago - ${paymentData.transactionId}`,
+      subject: `✅ Payment Confirmation - ${paymentData.transactionId}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -619,39 +619,39 @@ async function sendPaymentConfirmation(email, paymentData) {
 </head>
 <body>
     <div class="header">
-        <h1>✅ Pago Confirmado</h1>
+        <h1>✅ Payment Confirmed</h1>
         <p>Ensurity Express Payments</p>
     </div>
 
     <div class="content">
-        <h2>Hola ${paymentData.clientName},</h2>
-        <p>Tu pago ha sido procesado exitosamente a través de Authorize.Net.</p>
+        <h2>Hello ${paymentData.clientName},</h2>
+        <p>Your payment has been successfully processed through Authorize.Net.</p>
 
         <div class="receipt">
-            <h3>📋 Comprobante de Pago</h3>
-            <p><strong>Monto:</strong> $${paymentData.amount}</p>
-            <p><strong>ID de Transacción:</strong> ${
+            <h3>📋 Payment Receipt</h3>
+            <p><strong>Amount:</strong> $${paymentData.amount}</p>
+            <p><strong>Transaction ID:</strong> ${
               paymentData.transactionId
             }</p>
-            <p><strong>Código de Autorización:</strong> ${
+            <p><strong>Authorization Code:</strong> ${
               paymentData.authCode || "N/A"
             }</p>
-            <p><strong>Referencia:</strong> ${
+            <p><strong>Reference:</strong> ${
               paymentData.referenceId || paymentData.transactionId
             }</p>
-            <p><strong>Procesador:</strong> Authorize.Net</p>
-            <p><strong>Fecha:</strong> ${new Date().toLocaleDateString()}</p>
-            <p><strong>Hora:</strong> ${new Date().toLocaleTimeString()}</p>
+            <p><strong>Processor:</strong> Authorize.Net</p>
+            <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+            <p><strong>Time:</strong> ${new Date().toLocaleTimeString()}</p>
         </div>
 
-        <p>Hemos registrado tu pago en nuestro sistema. Este comprobante sirve como recibo oficial.</p>
+        <p>We have recorded your payment in our system. This receipt serves as an official proof of payment.</p>
 
-        <p><strong>Gracias por confiar en Ensurity Express.</strong></p>
+        <p><strong>Thank you for trusting Ensurity Express.</strong></p>
     </div>
 
     <div class="footer">
         <p>Ensurity Express Payments System<br>
-        <small>Este es un email automático, por favor no respondas a este mensaje.</small></p>
+        <small>This is an automated email, please do not reply to this message.</small></p>
     </div>
 </body>
 </html>
