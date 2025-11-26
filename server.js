@@ -58,21 +58,21 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// Verificar conexión SMTP
+// Verify SMTP connection
 transporter.verify(function (error) {
   if (error) {
-    console.log("❌ Error configuración SMTP:", error);
+    console.log("❌ SMTP configuration error:", error);
   } else {
-    console.log("✅ Servidor SMTP listo para enviar emails");
+    console.log("✅ SMTP server ready to send emails");
   }
 });
 
-// Almacenamientos en memoria
+// In-memory storage
 const paymentTokens = new Map();
 const clientDataStore = new Map();
 
 // =====================================
-// CLASE AUTHORIZE.NET SERVICE
+// AUTHORIZE.NET SERVICE CLASS
 // =====================================
 class AuthorizeNetService {
   constructor() {
@@ -149,7 +149,7 @@ class AuthorizeNetService {
               },
             },
             order: {
-              // 🔹 Usamos el generador seguro de invoiceNumber
+              // 🔹 Using the secure invoiceNumber generator
               invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
               description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
             },
@@ -179,7 +179,7 @@ class AuthorizeNetService {
         },
       };
 
-      console.log("📤 Enviando request a Authorize.Net:", {
+      console.log("📤 Sending request to Authorize.Net:", {
         url: `${this.getBaseUrl()}/xml/v1/request.api`,
         payload: {
           ...payload,
@@ -202,7 +202,7 @@ class AuthorizeNetService {
         }
       );
 
-      console.log("✅ Respuesta de Authorize.Net:", response.data);
+      console.log("✅ Authorize.Net Response:", response.data);
 
       const result = response.data;
       const transactionResponse = result.transactionResponse;
@@ -226,11 +226,11 @@ class AuthorizeNetService {
         const errorMsg =
           transactionResponse?.errors?.error?.[0]?.errorText ||
           result.messages?.message?.[0]?.text ||
-          "Transacción fallida en Authorize.Net";
+          "Transaction failed in Authorize.Net";
         throw new Error(errorMsg);
       }
     } catch (error) {
-      console.error("❌ Error procesando transacción con Authorize.Net:", {
+      console.error("❌ Error processing transaction with Authorize.Net:", {
         status: error.response?.status,
         data: error.response?.data,
         message: error.message,
@@ -246,11 +246,11 @@ class AuthorizeNetService {
     }
   }
 
-  // Crear Hosted Payment Page (HPP) para Accept Hosted
+  // Create Hosted Payment Page (HPP) for Accept Hosted
   async createHostedPaymentPage(paymentData) {
     try {
-      console.log("🔄 Creando página de pago hospedada...");
-      console.log("📝 Datos de pago:", {
+      console.log("🔄 Creating hosted payment page...");
+      console.log("📝 Payment data:", {
         client: paymentData.customerName,
         email: paymentData.customerEmail,
         amount: paymentData.amount,
@@ -287,7 +287,7 @@ class AuthorizeNetService {
                 }),
               },
               {
-                // 🔹 IMPORTANTE para modo IFRAME
+                // 🔹 IMPORTANT for IFRAME mode
                 settingName: "hostedPaymentIFrameCommunicatorUrl",
                 settingValue: JSON.stringify({
                   url: `${BASE_URL}/iframe-communicator`,
@@ -298,9 +298,9 @@ class AuthorizeNetService {
         },
       };
 
-      console.log("📤 Enviando request HPP a Authorize.Net:", {
+      console.log("📤 Sending HPP request to Authorize.Net:", {
         url: `${this.getBaseUrl()}/xml/v1/request.api`,
-        environment: this.useSandbox ? "SANDBOX" : "PRODUCCIÓN",
+        environment: this.useSandbox ? "SANDBOX" : "PRODUCTION",
       });
 
       const response = await axios.post(
@@ -313,7 +313,7 @@ class AuthorizeNetService {
       );
 
       console.log(
-        "✅ Respuesta HPP Authorize.Net:",
+        "✅ HPP Response from Authorize.Net:",
         JSON.stringify(response.data, null, 2)
       );
 
@@ -326,9 +326,9 @@ class AuthorizeNetService {
             : "https://accept.authorize.net"
         }/payment/payment`;
 
-        console.log("🔗 URL de pago (POST):", postUrl);
+        console.log("🔗 Payment URL (POST):", postUrl);
         console.log(
-          "🔍 Token para POST:",
+          "🔍 Token for POST:",
           result.token.substring(0, 50) + "..."
         );
 
@@ -337,17 +337,17 @@ class AuthorizeNetService {
           postUrl: postUrl,
           token: result.token,
           referenceId: this.generateReferenceId(),
-          message: "Página de pago hospedada generada exitosamente",
+          message: "Hosted payment page generated successfully",
         };
       } else {
         const errorMsg =
           result.messages?.message?.[0]?.text ||
-          "Error generando página de pago";
-        console.error("❌ Error en respuesta HPP:", errorMsg);
+          "Error generating payment page";
+        console.error("❌ Error in HPP response:", errorMsg);
         throw new Error(errorMsg);
       }
     } catch (error) {
-      console.error("💥 Error creando HPP:", {
+      console.error("💥 Error creating HPP:", {
         status: error.response?.status,
         data: error.response?.data,
         message: error.message,
@@ -357,7 +357,7 @@ class AuthorizeNetService {
     }
   }
 
-  // Verificar estado de transacción
+  // Verify transaction status
   async getTransactionStatus(transactionId) {
     try {
       const payload = {
@@ -379,7 +379,7 @@ class AuthorizeNetService {
       return response.data;
     } catch (error) {
       console.error(
-        "❌ Error verificando transacción:",
+        "❌ Error verifying transaction:",
         error.response?.data || error.message
       );
       throw error;
@@ -388,7 +388,7 @@ class AuthorizeNetService {
 }
 
 // =====================================
-// CLASE Bitrix24
+// BITRIX24 CLASS
 // =====================================
 class Bitrix24 {
   constructor() {
@@ -399,13 +399,13 @@ class Bitrix24 {
 
   async getDeal(dealId) {
     try {
-      console.log(`🔍 Obteniendo deal ${dealId}...`);
+      console.log(`🔍 Getting deal ${dealId}...`);
       const response = await axios.get(`${this.webhookUrl}/crm.deal.get`, {
         params: { id: dealId },
       });
 
       if (response.data.result) {
-        console.log(`✅ Deal obtenido:`, {
+        console.log(`✅ Deal obtained:`, {
           title: response.data.result.TITLE,
           contactId: response.data.result.CONTACT_ID,
           stageId: response.data.result.STAGE_ID,
@@ -413,85 +413,85 @@ class Bitrix24 {
         });
         return response.data.result;
       } else {
-        console.log("❌ Deal no encontrado");
+        console.log("❌ Deal not found");
         return null;
       }
     } catch (error) {
-      console.error("❌ Error obteniendo deal:", error.message);
+      console.error("❌ Error getting deal:", error.message);
       throw error;
     }
   }
 
   async getContactFromDeal(dealId) {
     try {
-      console.log(`🔍 Obteniendo contacto desde deal ${dealId}...`);
+      console.log(`🔍 Getting contact from deal ${dealId}...`);
       const deal = await this.getDeal(dealId);
 
       if (deal && deal.CONTACT_ID && deal.CONTACT_ID !== "0") {
-        console.log(`✅ Deal tiene contacto asociado: ${deal.CONTACT_ID}`);
+        console.log(`✅ Deal has associated contact: ${deal.CONTACT_ID}`);
         const contact = await this.getContact(deal.CONTACT_ID);
         return contact;
       } else {
-        console.log("❌ Deal no tiene contacto asociado válido");
+        console.log("❌ Deal has no valid associated contact");
         return null;
       }
     } catch (error) {
-      console.error("❌ Error obteniendo contacto desde deal:", error.message);
+      console.error("❌ Error getting contact from deal:", error.message);
       return null;
     }
   }
 
   async getContact(contactId) {
     try {
-      console.log(`🔍 Obteniendo contacto ${contactId}...`);
+      console.log(`🔍 Getting contact ${contactId}...`);
       const response = await axios.get(`${this.webhookUrl}/crm.contact.get`, {
         params: { id: contactId },
       });
 
       if (response.data.result) {
-        console.log(`✅ Contacto obtenido:`, {
+        console.log(`✅ Contact obtained:`, {
           name: `${response.data.result.NAME || ""} ${
             response.data.result.LAST_NAME || ""
           }`,
-          email: response.data.result.EMAIL?.[0]?.VALUE || "No disponible",
-          phone: response.data.result.PHONE?.[0]?.VALUE || "No disponible",
+          email: response.data.result.EMAIL?.[0]?.VALUE || "Not available",
+          phone: response.data.result.PHONE?.[0]?.VALUE || "Not available",
         });
       }
 
       return response.data.result;
     } catch (error) {
-      console.error("❌ Error obteniendo contacto:", error.message);
+      console.error("❌ Error getting contact:", error.message);
       throw error;
     }
   }
 
   async updateDeal(dealId, data) {
     try {
-      console.log(`🔄 Actualizando deal ${dealId}...`);
+      console.log(`🔄 Updating deal ${dealId}...`);
       const response = await axios.post(`${this.webhookUrl}/crm.deal.update`, {
         id: dealId,
         fields: data,
       });
-      console.log(`✅ Deal actualizado exitosamente`);
+      console.log(`✅ Deal updated successfully`);
       return response.data.result;
     } catch (error) {
-      console.error("❌ Error actualizando deal:", error.message);
+      console.error("❌ Error updating deal:", error.message);
       throw error;
     }
   }
 }
 
-// Inicializar servicios
+// Initialize services
 const authorizeService = new AuthorizeNetService();
 const bitrix24 = new Bitrix24();
 
-// Generar token seguro
+// Generate secure token
 function generateSecureToken() {
   return crypto.randomBytes(32).toString("hex");
 }
 
 // ================================
-// FUNCIONES DE EMAIL
+// EMAIL FUNCTIONS
 // ================================
 async function sendPaymentEmail(
   email,
@@ -501,18 +501,18 @@ async function sendPaymentEmail(
   amount = null
 ) {
   try {
-    // Obtener el monto del deal si no se proporciona
+    // Get the deal amount if not provided
     let dealAmount = amount;
     if (!dealAmount && dealId) {
       try {
         const deal = await bitrix24.getDeal(dealId);
-        dealAmount = deal?.OPPORTUNITY || "20.80"; // Valor por defecto
+        dealAmount = deal?.OPPORTUNITY || "20.80"; // Default value
       } catch (error) {
-        console.error("Error obteniendo monto del deal:", error);
-        dealAmount = "20.80"; // Valor por defecto
+        console.error("Error getting deal amount:", error);
+        dealAmount = "20.80"; // Default value
       }
     } else if (!dealAmount) {
-      dealAmount = "20.80"; // Valor por defecto
+      dealAmount = "20.80"; // Default value
     }
 
     const mailOptions = {
@@ -588,10 +588,10 @@ ROCKWALL TX, 75032<br>
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email enviado a: ${email} con monto fijo: $${dealAmount}`);
+    console.log(`✅ Email sent to: ${email} with fixed amount: $${dealAmount}`);
     return info;
   } catch (error) {
-    console.error("❌ Error enviando email:", error);
+    console.error("❌ Error sending email:", error);
     throw error;
   }
 }
@@ -659,23 +659,23 @@ async function sendPaymentConfirmation(email, paymentData) {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email de confirmación enviado a: ${email}`);
+    console.log(`✅ Confirmation email sent to: ${email}`);
     return info;
   } catch (error) {
-    console.error("❌ Error enviando email de confirmación:", error);
+    console.error("❌ Error sending confirmation email:", error);
     throw error;
   }
 }
 
 // =====================================
-// COMUNICADOR IFRAME PARA AUTHORIZE.NET
+// IFRAME COMMUNICATOR FOR AUTHORIZE.NET
 // =====================================
 app.get("/iframe-communicator", (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Ensurity Express - Comunicador de Pago</title>
+    <title>Ensurity Express - Payment Communicator</title>
     <script type="text/javascript">
         function callParentFunction(str) {
             if (parent && parent.message) {
@@ -691,24 +691,24 @@ app.get("/iframe-communicator", (req, res) => {
         
         window.addEventListener("message", receiveMessage, false);
         
-        // Notificar que el iframe está listo
+        // Notify that the iframe is ready
         if (window.parent !== window) {
             window.parent.postMessage("iframeReady", "*");
         }
     </script>
 </head>
 <body>
-    <p>Comunicador de pago Ensurity Express</p>
+    <p>Ensurity Express Payment Communicator</p>
 </body>
 </html>
   `);
 });
 
 // =====================================
-// RUTA PRINCIPAL DEL WIDGET BITRIX24
+// MAIN BITRIX24 WIDGET ROUTE
 // =====================================
 app.post("/widget/bitrix24", async (req, res) => {
-  console.log("🎯 WIDGET BITRIX24 LLAMADO (POST)");
+  console.log("🎯 BITRIX24 WIDGET CALLED (POST)");
   console.log("PLACEMENT:", req.body.PLACEMENT);
   console.log("PLACEMENT_OPTIONS:", req.body.PLACEMENT_OPTIONS);
 
@@ -734,16 +734,16 @@ app.post("/widget/bitrix24", async (req, res) => {
 
       if (PLACEMENT === "CRM_CONTACT_DETAIL_TAB") {
         entityType = "contact";
-        console.log(`👤 Es un CONTACTO: ${entityId}`);
+        console.log(`👤 It is a CONTACT: ${entityId}`);
         contactData = await bitrix24.getContact(entityId);
       } else if (PLACEMENT === "CRM_DEAL_DETAIL_TAB") {
         entityType = "deal";
-        console.log(`💼 Es un DEAL: ${entityId}`);
+        console.log(`💼 It is a DEAL: ${entityId}`);
         contactData = await bitrix24.getContactFromDeal(entityId);
 
         const deal = await bitrix24.getDeal(entityId);
         dealAmount = deal?.OPPORTUNITY || "20.80";
-        console.log(`💰 Monto del deal: $${dealAmount}`);
+        console.log(`💰 Deal amount: $${dealAmount}`);
 
         if (!contactData) {
           hasValidContact = false;
@@ -779,16 +779,16 @@ app.post("/widget/bitrix24", async (req, res) => {
             <div class="widget-container">
                 <div class="header">
                     <h2>Ensurity Express Payments</h2>
-                    <p>Sistema de pagos con Authorize.Net</p>
+                    <p>Payment system with Authorize.Net</p>
                 </div>
                 <div class="content">
                     <div class="warning">
-                        <h3>⚠️ Información requerida</h3>
-                        <p>Este ${entityType} no tiene un contacto asociado válido.</p>
-                        <p>Por favor asigna un contacto al ${entityType} para poder generar links de pago.</p>
+                        <h3>⚠️ Required information</h3>
+                        <p>This ${entityType} does not have a valid associated contact.</p>
+                        <p>Please assign a contact to the ${entityType} to generate payment links.</p>
                     </div>
                     <button class="btn" onclick="testConnection()">
-                        🔗 Probar conexión
+                        🔗 Test connection
                     </button>
                     <div id="result"></div>
                 </div>
@@ -796,13 +796,13 @@ app.post("/widget/bitrix24", async (req, res) => {
             <script>
                 async function testConnection() {
                     const resultDiv = document.getElementById('result');
-                    resultDiv.innerHTML = '⏳ Probando conexión...';
+                    resultDiv.innerHTML = '⏳ Testing connection...';
                     try {
                         const response = await fetch('${BASE_URL}/health');
                         const result = await response.json();
-                        resultDiv.innerHTML = '✅ Conexión exitosa con el servidor';
+                        resultDiv.innerHTML = '✅ Successful connection to server';
                     } catch (error) {
-                        resultDiv.innerHTML = '❌ Error de conexión';
+                        resultDiv.innerHTML = '❌ Connection error';
                     }
                 }
             </script>
@@ -857,10 +857,10 @@ app.post("/widget/bitrix24", async (req, res) => {
 
         <div class="content">
             <div class="client-info">
-                <h3>👤 Información del cliente</h3>
+                <h3>👤 Client information</h3>
                 <div class="info-item">
                     <span class="info-icon">👤</span>
-                    <span><strong>Nombre:</strong> ${clientName}</span>
+                    <span><strong>Name:</strong> ${clientName}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-icon">📧</span>
@@ -868,7 +868,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 </div>
                 <div class="info-item">
                     <span class="info-icon">📞</span>
-                    <span><strong>Teléfono:</strong> ${clientPhone}</span>
+                    <span><strong>Phone:</strong> ${clientPhone}</span>
                 </div>
                 <div class="info-item">
                     <span class="info-icon">🆔</span>
@@ -880,7 +880,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 <div class="amount-info">
                     <div class="info-item">
                         <span class="info-icon">💰</span>
-                        <span><strong>Monto del deal:</strong> $${dealAmount} USD</span>
+                        <span><strong>Deal amount:</strong> $${dealAmount} USD</span>
                     </div>
                 </div>
                 `
@@ -889,15 +889,15 @@ app.post("/widget/bitrix24", async (req, res) => {
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generar link de pago Authorize.Net
+                🎯 Generate Authorize.Net payment link
             </button>
 
             <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
-                📧 Enviar link por email (monto fijo)
+                📧 Send link by email (fixed amount)
             </button>
 
             <button class="btn btn-secondary" onclick="testConnection()">
-                🔗 Probar conexión
+                🔗 Test connection
             </button>
 
             <div id="result" class="result"></div>
@@ -914,7 +914,7 @@ app.post("/widget/bitrix24", async (req, res) => {
 
         async function generatePaymentLink() {
             const resultDiv = document.getElementById('result');
-            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>⏳ Generando link de pago seguro...</div>';
+            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>⏳ Generating secure payment link...</div>';
             resultDiv.className = 'result';
 
             try {
@@ -937,30 +937,30 @@ app.post("/widget/bitrix24", async (req, res) => {
                 if (result.success) {
                     resultDiv.innerHTML =
                         '<div style="color: #af100a; text-align: center;">' +
-                        '✅ <strong>Link generado exitosamente</strong></div><br>' +
-                        '<strong>🔗 Enlace de pago seguro:</strong><br>' +
+                        '✅ <strong>Link generated successfully</strong></div><br>' +
+                        '<strong>🔗 Secure payment link:</strong><br>' +
                         '<div class="link-display">' + result.paymentLink + '</div><br>' +
                         '<div class="amount-info">' +
-                        '<strong>💡 Nota:</strong> El cliente podrá modificar el monto en el portal de pagos.' +
+                        '<strong>💡 Note:</strong> The client can modify the amount on the payment portal.' +
                         '</div><br>' +
-                        '<button class="btn" onclick="copyToClipboard(\\'' + result.paymentLink + '\\')">📋 Copiar link</button>' +
+                        '<button class="btn" onclick="copyToClipboard(\\'' + result.paymentLink + '\\')">📋 Copy link</button>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #ffeaea; border-radius: 5px; font-size: 11px; color: #af100a;">' +
-                        '💡 Envía este link al cliente para que complete el pago.' +
+                        '💡 Send this link to the client to complete the payment.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
-                    resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error:</strong> ' + (result.error || 'Error generando link') + '</div>';
+                    resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error:</strong> ' + (result.error || 'Error generating link') + '</div>';
                     resultDiv.className = 'result error';
                 }
             } catch (error) {
-                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error de conexión:</strong> ' + error.message + '</div>';
+                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Connection error:</strong> ' + error.message + '</div>';
                 resultDiv.className = 'result error';
             }
         }
 
         async function sendPaymentEmailToClient() {
             const resultDiv = document.getElementById('result');
-            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>📧 Enviando email al cliente...</div>';
+            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>📧 Sending email to client...</div>';
             resultDiv.className = 'result';
 
             try {
@@ -981,30 +981,30 @@ app.post("/widget/bitrix24", async (req, res) => {
                 if (result.success) {
                     resultDiv.innerHTML =
                         '<div style="color: #af100a; text-align: center;">' +
-                        '✅ <strong>Email enviado exitosamente</strong></div><br>' +
+                        '✅ <strong>Email sent successfully</strong></div><br>' +
                         '<div class="email-section">' +
-                        '<strong>📧 Destinatario:</strong> ' + CLIENT_EMAIL + '<br>' +
-                        '<strong>👤 Cliente:</strong> ' + CLIENT_NAME + '<br>' +
-                        '<strong>💰 Monto predefinido:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
-                        '<strong>🆔 Referencia:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
+                        '<strong>📧 Recipient:</strong> ' + CLIENT_EMAIL + '<br>' +
+                        '<strong>👤 Client:</strong> ' + CLIENT_NAME + '<br>' +
+                        '<strong>💰 Predefined amount:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
+                        '<strong>🆔 Reference:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
                         '</div>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #d4edda; border-radius: 5px; font-size: 11px; color: #155724;">' +
-                        '💡 El cliente recibió el link de pago por email con el monto fijo establecido.' +
+                        '💡 The client received the payment link by email with the fixed amount set.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
-                    resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error:</strong> ' + (result.error || 'Error enviando email') + '</div>';
+                    resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error:</strong> ' + (result.error || 'Error sending email') + '</div>';
                     resultDiv.className = 'result error';
                 }
             } catch (error) {
-                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error de conexión:</strong> ' + error.message + '</div>';
+                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Connection error:</strong> ' + error.message + '</div>';
                 resultDiv.className = 'result error';
             }
         }
 
         async function testConnection() {
             const resultDiv = document.getElementById('result');
-            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>⏳ Probando conexión...</div>';
+            resultDiv.innerHTML = '<div style="text-align: center;"><div class="loading"></div><br>⏳ Testing connection...</div>';
             resultDiv.className = 'result';
 
             try {
@@ -1012,22 +1012,22 @@ app.post("/widget/bitrix24", async (req, res) => {
                 const result = await response.json();
                 resultDiv.innerHTML =
                     '<div style="color: #af100a; text-align: center;">' +
-                    '✅ <strong>Conexión exitosa</strong></div><br>' +
+                    '✅ <strong>Successful connection</strong></div><br>' +
                     '<div style="text-align: left; font-size: 11px;">' +
-                    '<div><strong>Servidor:</strong> ' + result.server + '</div>' +
+                    '<div><strong>Server:</strong> ' + result.server + '</div>' +
                     '<div><strong>URL:</strong> ' + SERVER_URL + '</div>' +
-                    '<div><strong>Authorize.Net:</strong> ' + (result.authorize?.environment || 'No configurado') + '</div>' +
+                    '<div><strong>Authorize.Net:</strong> ' + (result.authorize?.environment || 'Not configured') + '</div>' +
                     '</div>';
                 resultDiv.className = 'result success';
             } catch (error) {
-                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Error de conexión</strong><br>' + error.message + '</div>';
+                resultDiv.innerHTML = '<div style="color: #dc3545;">❌ <strong>Connection error</strong><br>' + error.message + '</div>';
                 resultDiv.className = 'result error';
             }
         }
 
         function copyToClipboard(text) {
             navigator.clipboard.writeText(text).then(() => {
-                alert('✅ Link copiado al portapapeles');
+                alert('✅ Link copied to clipboard');
             });
         }
 
@@ -1040,26 +1040,26 @@ app.post("/widget/bitrix24", async (req, res) => {
       `;
     }
 
-    console.log("✅ Enviando HTML del widget a Bitrix24");
+    console.log("✅ Sending widget HTML to Bitrix24");
     res.send(widgetHTML);
   } catch (error) {
-    console.error("💥 Error en widget:", error);
+    console.error("💥 Error in widget:", error);
     res.status(500).send(`
       <div style="padding: 20px; background: #f8d7da; color: #721c24; border-radius: 8px; text-align: center;">
-        <h3>❌ Error en el Widget</h3>
-        <p><strong>Detalles:</strong> ${error.message}</p>
+        <h3>❌ Widget Error</h3>
+        <p><strong>Details:</strong> ${error.message}</p>
         <button style="padding: 10px 20px; background: #af100a; color: white; border: none; border-radius: 5px; cursor: pointer;" 
-                onclick="location.reload()">🔄 Reintentar</button>
+                onclick="location.reload()">🔄 Retry</button>
       </div>
     `);
   }
 });
 
 // =====================================
-// WEBHOOK PARA GENERAR LINKS DE PAGO
+// WEBHOOK TO GENERATE PAYMENT LINKS
 // =====================================
 app.post("/webhook/bitrix24", async (req, res) => {
-  console.log("🔗 WEBHOOK BITRIX24 LLAMADO");
+  console.log("🔗 BITRIX24 WEBHOOK CALLED");
   console.log("Body:", req.body);
 
   try {
@@ -1068,7 +1068,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
     if (!PLACEMENT_OPTIONS) {
       return res.status(400).json({
         success: false,
-        error: "PLACEMENT_OPTIONS no encontrado",
+        error: "PLACEMENT_OPTIONS not found",
       });
     }
 
@@ -1081,7 +1081,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
     } catch (parseError) {
       return res.status(400).json({
         success: false,
-        error: "PLACEMENT_OPTIONS no es un JSON válido",
+        error: "PLACEMENT_OPTIONS is not valid JSON",
       });
     }
 
@@ -1094,7 +1094,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
     if (!entityId) {
       return res.status(400).json({
         success: false,
-        error: "Entity ID no encontrado",
+        error: "Entity ID not found",
       });
     }
 
@@ -1112,7 +1112,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
 
     paymentTokens.set(token, tokenData);
     console.log(
-      `✅ Token generado para ${entityType} ${entityId} - Flujo: Link Directo`
+      `✅ Token generated for ${entityType} ${entityId} - Flow: Direct Link`
     );
 
     const paymentLink = `${BASE_URL}/payment/${token}`;
@@ -1125,27 +1125,27 @@ app.post("/webhook/bitrix24", async (req, res) => {
       contactEmail: contactEmail,
       flowType: "direct_link",
       message:
-        "Link de pago generado exitosamente - Cliente puede modificar monto",
+        "Payment link generated successfully - Client can modify amount",
     });
   } catch (error) {
-    console.error("❌ Error en webhook:", error);
+    console.error("❌ Error in webhook:", error);
     res.status(500).json({
       success: false,
-      error: "Error al procesar la solicitud",
+      error: "Error processing the request",
     });
   }
 });
 
 // =====================================
-// RUTA DE PAGO CON TOKEN (BANNER + IFRAME HPP)
+// PAYMENT ROUTE WITH TOKEN (BANNER + IFRAME HPP)
 // =====================================
 // =====================================
-// RUTA DE PAGO CON TOKEN (BANNER + HPP EN IFRAME)
+// PAYMENT ROUTE WITH TOKEN (BANNER + HPP IN IFRAME)
 // =====================================
 app.get("/payment/:token", async (req, res) => {
   const { token } = req.params;
 
-  console.log(`🔐 Accediendo a pago con token: ${token.substring(0, 10)}...`);
+  console.log(`🔐 Accessing payment with token: ${token.substring(0, 10)}...`);
 
   try {
     const tokenData = paymentTokens.get(token);
@@ -1155,7 +1155,7 @@ app.get("/payment/:token", async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Link Inválido - Ensurity Express</title>
+            <title>Invalid Link - Ensurity Express</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -1167,9 +1167,9 @@ app.get("/payment/:token", async (req, res) => {
         <body>
             <div class="container">
                 <div class="error-icon">❌</div>
-                <h1>Link inválido o expirado</h1>
-                <p>Este link de pago ha expirado o es inválido.</p>
-                <p>Por favor solicita un nuevo link de pago al agente.</p>
+                <h1>Invalid or expired link</h1>
+                <p>This payment link has expired or is invalid.</p>
+                <p>Please request a new payment link from the agent.</p>
             </div>
         </body>
         </html>
@@ -1178,12 +1178,12 @@ app.get("/payment/:token", async (req, res) => {
 
     if (Date.now() > tokenData.expires) {
       paymentTokens.delete(token);
-      console.log("⏰ Token expirado");
+      console.log("⏰ Token expired");
       return res.status(410).send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Link Expirado - Ensurity Express</title>
+            <title>Expired Link - Ensurity Express</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
                 .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -1195,9 +1195,9 @@ app.get("/payment/:token", async (req, res) => {
         <body>
             <div class="container">
                 <div class="error-icon">⏰</div>
-                <h1>Link expirado</h1>
-                <p>Este link de pago ha expirado.</p>
-                <p>Por favor solicita un nuevo link al agente.</p>
+                <h1>Expired link</h1>
+                <p>This payment link has expired.</p>
+                <p>Please request a new link from the agent.</p>
             </div>
         </body>
         </html>
@@ -1205,19 +1205,19 @@ app.get("/payment/:token", async (req, res) => {
     }
 
     console.log(
-      `✅ Token válido para: ${tokenData.contactName} (${tokenData.contactEmail}) - Flujo: ${tokenData.flowType}`
+      `✅ Token valid for: ${tokenData.contactName} (${tokenData.contactEmail}) - Flow: ${tokenData.flowType}`
     );
 
-    // Monto que se usará en el HPP (email, widget, web, etc.)
+    // Amount to be used in the HPP (email, widget, web, etc.)
     const defaultAmount = tokenData.dealAmount || "20.80";
 
-    // 🌐 Página que muestra SOLO tu banner + iframe con el HPP
+    // 🌐 Page that displays ONLY your banner + iframe with the HPP
     const html = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Ensurity Express - Pago Seguro</title>
+  <title>Ensurity Express - Secure Payment</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1228,7 +1228,7 @@ app.get("/payment/:token", async (req, res) => {
       display: flex;
       flex-direction: column;
     }
-    /* 🟥 Banner superior tipo Invoice (no tocamos el HPP) */
+    /* 🟥 Top banner like Invoice (we don't touch the HPP) */
     .top-banner {
       background-color: #5b0000;
       color: #ffffff;
@@ -1262,7 +1262,7 @@ app.get("/payment/:token", async (req, res) => {
       font-size: 12px;
       line-height: 1.4;
     }
-    /* Contenedor del iframe */
+    /* iframe container */
     .iframe-wrapper {
       flex: 1;
       background: #f4f4f4;
@@ -1324,10 +1324,10 @@ app.get("/payment/:token", async (req, res) => {
   </style>
 </head>
 <body>
-  <!-- 🟥 Banner superior: aquí controlas logo/textos para que se vea igual a la imagen -->
+  <!-- 🟥 Top banner: here you control logo/texts so it looks the same as the image -->
   <div class="top-banner">
     <div class="banner-left">
-      <!-- Cambia la URL del logo por la tuya -->
+      <!-- Change the logo URL to yours -->
    <img
   class="banner-logo"
   src="/imagenes/logo-blanco-ee.png"
@@ -1344,7 +1344,7 @@ app.get("/payment/:token", async (req, res) => {
     </div>
   </div>
 
-  <!-- Contenido del HPP dentro de un iframe -->
+  <!-- Content of the HPP inside an iframe -->
   <div class="iframe-wrapper">
     <div class="iframe-inner">
       <div id="loadingBox" class="loading-box">
@@ -1375,10 +1375,10 @@ app.get("/payment/:token", async (req, res) => {
         const result = await response.json();
 
         if (!result.success) {
-          throw new Error(result.error || "No se pudo generar el link de pago.");
+          throw new Error(result.error || "Could not generate payment link.");
         }
 
-        // Creamos un form oculto que hace POST al HPP, apuntando al iframe
+        // We create a hidden form that POSTs to the HPP, pointing to the iframe
         const form = document.createElement("form");
         form.method = "POST";
         form.action = result.postUrl;
@@ -1393,22 +1393,22 @@ app.get("/payment/:token", async (req, res) => {
         form.appendChild(tokenInput);
         document.body.appendChild(form);
 
-        // Enviamos el formulario al iframe
+        // Send the form to the iframe
         form.submit();
 
-        // Ocultamos el loader cuando el iframe termina de cargar
+        // Hide loader when iframe finishes loading
         const frame = document.getElementById("hppFrame");
         frame.addEventListener("load", () => {
           loadingBox.style.display = "none";
         });
 
       } catch (error) {
-        console.error("Error cargando HPP:", error);
+        console.error("Error loading HPP:", error);
         loadingBox.innerHTML = \`
           <div class="error-box">
-            <strong>❌ Error al cargar el formulario de pago</strong><br/>
+            <strong>❌ Error loading payment form</strong><br/>
             \${error.message}<br/>
-            <button onclick="window.location.reload()">🔄 Reintentar</button>
+            <button onclick="window.location.reload()">🔄 Retry</button>
           </div>
         \`;
       }
@@ -1433,10 +1433,10 @@ app.get("/payment/:token", async (req, res) => {
 });
 
 // =====================================
-// API PARA ENVIAR EMAIL CON LINK DE PAGO
+// API TO SEND PAYMENT EMAIL
 // =====================================
 app.post("/api/send-payment-email", async (req, res) => {
-  console.log("📧 SOLICITUD DE ENVÍO DE EMAIL CON MONTO FIJO");
+  console.log("📧 PAYMENT EMAIL SUBMISSION REQUEST");
 
   try {
     const { entityId, entityType, clientEmail, clientName, amount } = req.body;
@@ -1444,7 +1444,7 @@ app.post("/api/send-payment-email", async (req, res) => {
     if (!entityId || !clientEmail) {
       return res.status(400).json({
         success: false,
-        error: "Datos incompletos para enviar email",
+        error: "Incomplete data to send email",
       });
     }
 
@@ -1454,7 +1454,7 @@ app.post("/api/send-payment-email", async (req, res) => {
         const deal = await bitrix24.getDeal(entityId);
         dealAmount = deal?.OPPORTUNITY || "20.80";
       } catch (error) {
-        console.error("Error obteniendo monto del deal:", error);
+        console.error("Error getting deal amount:", error);
         dealAmount = "20.80";
       }
     }
@@ -1468,7 +1468,7 @@ app.post("/api/send-payment-email", async (req, res) => {
       dealAmount: dealAmount,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
-      flowType: "email", // 🔴 FLUJO EMAIL (monto fijo)
+      flowType: "email", // 🔴 EMAIL FLOW (fixed amount)
     };
 
     paymentTokens.set(token, tokenData);
@@ -1485,7 +1485,7 @@ app.post("/api/send-payment-email", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Email enviado exitosamente con monto fijo",
+      message: "Email sent successfully with fixed amount",
       clientEmail: clientEmail,
       clientName: clientName,
       entityId: entityId,
@@ -1493,20 +1493,20 @@ app.post("/api/send-payment-email", async (req, res) => {
       flowType: "email",
     });
   } catch (error) {
-    console.error("❌ Error enviando email:", error);
+    console.error("❌ Error sending email:", error);
     res.status(500).json({
       success: false,
-      error: "Error al enviar el email",
+      error: "Error sending email",
       details: error.message,
     });
   }
 });
 
 // =====================================
-// API PARA GENERAR LINK AUTHORIZE.NET HPP
+// API TO GENERATE AUTHORIZE.NET HPP LINK
 // =====================================
 app.post("/api/generate-authorize-link", async (req, res) => {
-  console.log("🔗 SOLICITUD DE GENERACIÓN AUTHORIZE.NET HPP");
+  console.log("🔗 AUTHORIZE.NET HPP GENERATION REQUEST");
 
   try {
     const { token, amount } = req.body;
@@ -1514,7 +1514,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
     if (!token) {
       return res.status(400).json({
         success: false,
-        error: "Token no proporcionado",
+        error: "Token not provided",
       });
     }
 
@@ -1523,18 +1523,18 @@ app.post("/api/generate-authorize-link", async (req, res) => {
     if (!tokenData) {
       return res.status(400).json({
         success: false,
-        error: "Token inválido o expirado",
+        error: "Invalid or expired token",
       });
     }
 
     if (!amount || parseFloat(amount) <= 0) {
       return res.status(400).json({
         success: false,
-        error: "Monto inválido. Debe ser mayor a 0",
+        error: "Invalid amount. Must be greater than 0",
       });
     }
 
-    console.log("🔄 Generando link Authorize.Net para:", {
+    console.log("🔄 Generating Authorize.Net link for:", {
       client: tokenData.contactName,
       email: tokenData.contactEmail,
       amount: amount,
@@ -1556,7 +1556,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
     paymentTokens.set(token, tokenData);
 
     console.log(
-      `✅ Referencia Authorize.Net guardada: ${hppResult.referenceId} - Monto: $${amount}`
+      `✅ Authorize.Net reference saved: ${hppResult.referenceId} - Amount: $${amount}`
     );
 
     res.json({
@@ -1566,23 +1566,23 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       referenceId: hppResult.referenceId,
       amount: amount,
       flowType: tokenData.flowType,
-      message: "Link de pago Authorize.Net generado exitosamente",
+      message: "Authorize.Net payment link generated successfully",
     });
   } catch (error) {
-    console.error("❌ Error generando link Authorize.Net:", error.message);
+    console.error("❌ Error generating Authorize.Net link:", error.message);
 
     res.status(500).json({
       success: false,
-      error: error.message || "Error al generar el link de pago",
+      error: error.message || "Error generating payment link",
     });
   }
 });
 
 // =====================================
-// API PARA PROCESAR PAGOS CON AUTHORIZE.NET (NO CAMBIA HPP)
+// API TO PROCESS PAYMENTS WITH AUTHORIZE.NET (DOESN'T CHANGE HPP)
 // =====================================
 app.post("/api/process-payment", async (req, res) => {
-  console.log("💳 PROCESANDO PAGO CON AUTHORIZE.NET (INTEGRACIÓN REAL)");
+  console.log("💳 PROCESSING PAYMENT WITH AUTHORIZE.NET (REAL INTEGRATION)");
 
   try {
     const { token, amount, cardNumber, expiry, cvv, cardName } = req.body;
@@ -1590,7 +1590,7 @@ app.post("/api/process-payment", async (req, res) => {
     if (!token) {
       return res.status(400).json({
         success: false,
-        error: "Token no proporcionado",
+        error: "Token not provided",
       });
     }
 
@@ -1599,11 +1599,11 @@ app.post("/api/process-payment", async (req, res) => {
     if (!tokenData) {
       return res.status(400).json({
         success: false,
-        error: "Token inválido o expirado",
+        error: "Invalid or expired token",
       });
     }
 
-    console.log("🔄 Iniciando procesamiento con Authorize.Net para:", {
+    console.log("🔄 Starting processing with Authorize.Net for:", {
       client: tokenData.contactName,
       email: tokenData.contactEmail,
       amount: amount,
@@ -1645,16 +1645,16 @@ app.post("/api/process-payment", async (req, res) => {
         UF_CRM_PAYMENT_PROCESSOR: "Authorize.Net",
         UF_CRM_INVOICE_NUMBER: authResult.invoiceNumber,
       });
-      console.log(`✅ Bitrix24 actualizado para deal ${tokenData.entityId}`);
+      console.log(`✅ Bitrix24 updated for deal ${tokenData.entityId}`);
     } catch (bitrixError) {
-      console.error("❌ Error actualizando Bitrix24:", bitrixError.message);
+      console.error("❌ Error updating Bitrix24:", bitrixError.message);
     }
 
     paymentTokens.delete(token);
 
     res.json({
       success: true,
-      message: "Pago procesado exitosamente con Authorize.Net",
+      message: "Payment processed successfully with Authorize.Net",
       transactionId: authResult.transactionId,
       authCode: authResult.authCode,
       referenceId: authResult.referenceId,
@@ -1663,21 +1663,21 @@ app.post("/api/process-payment", async (req, res) => {
       authResponse: authResult.fullResponse,
     });
   } catch (error) {
-    console.error("❌ Error procesando pago con Authorize.Net:", error.message);
+    console.error("❌ Error processing payment with Authorize.Net:", error.message);
 
     res.status(500).json({
       success: false,
-      error: "Error al procesar el pago con Authorize.Net",
+      error: "Error processing payment with Authorize.Net",
       details: error.message,
     });
   }
 });
 
 // =====================================
-// WEBHOOK SILENT POST DE AUTHORIZE.NET
+// AUTHORIZE.NET SILENT POST WEBHOOK
 // =====================================
 app.post("/api/authorize-webhook", async (req, res) => {
-  console.log("🔔 AUTHORIZE.NET SILENT POST WEBHOOK RECIBIDO");
+  console.log("🔔 AUTHORIZE.NET SILENT POST WEBHOOK RECEIVED");
   console.log("Body:", req.body);
 
   try {
@@ -1691,11 +1691,11 @@ app.post("/api/authorize-webhook", async (req, res) => {
     } = req.body;
 
     if (!x_trans_id) {
-      console.log("❌ Webhook sin transaction ID");
+      console.log("❌ Webhook without transaction ID");
       return res.status(400).send("Missing transaction ID");
     }
 
-    console.log("📋 Datos de transacción recibidos:", {
+    console.log("📋 Transaction data received:", {
       transactionId: x_trans_id,
       responseCode: x_response_code,
       reason: x_response_reason_text,
@@ -1705,26 +1705,26 @@ app.post("/api/authorize-webhook", async (req, res) => {
     });
 
     if (x_response_code === "1") {
-      console.log("✅ Transacción APROBADA via webhook");
+      console.log("✅ Transaction APPROVED via webhook");
     } else {
       console.log(
-        "❌ Transacción DECLINADA via webhook:",
+        "❌ Transaction DECLINED via webhook:",
         x_response_reason_text
       );
     }
 
     res.status(200).send("OK");
   } catch (error) {
-    console.error("💥 Error procesando webhook:", error);
+    console.error("💥 Error processing webhook:", error);
     res.status(500).send("Error");
   }
 });
 
 // =====================================
-// CALLBACKS DE AUTHORIZE.NET
+// AUTHORIZE.NET CALLBACKS
 // =====================================
 app.get("/authorize/return", async (req, res) => {
-  console.log("✅ Authorize.Net Return URL llamada (GET)");
+  console.log("✅ Authorize.Net Return URL called (GET)");
   console.log("Query params:", req.query);
 
   const { transId, x_trans_id, amount, x_amount } = req.query;
@@ -1733,19 +1733,19 @@ app.get("/authorize/return", async (req, res) => {
 
   try {
     if (transactionId) {
-      console.log(`🔍 Obteniendo detalles de transacción: ${transactionId}`);
+      console.log(`🔍 Getting transaction details: ${transactionId}`);
 
       const transactionDetails = await authorizeService.getTransactionStatus(
         transactionId
       );
-      console.log("📋 Detalles de transacción:", transactionDetails);
+      console.log("📋 Transaction details:", transactionDetails);
 
       for (let [token, tokenData] of paymentTokens.entries()) {
         if (
           tokenData.authorizeReferenceId &&
           tokenData.authorizeReferenceId.includes(transactionId)
         ) {
-          console.log(`✅ Token encontrado para transacción ${transactionId}`);
+          console.log(`✅ Token found for transaction ${transactionId}`);
 
           try {
             await bitrix24.updateDeal(tokenData.entityId, {
@@ -1758,11 +1758,11 @@ app.get("/authorize/return", async (req, res) => {
               UF_CRM_PAYMENT_FLOW: tokenData.flowType || "unknown",
             });
             console.log(
-              `✅ Bitrix24 actualizado para deal ${tokenData.entityId}`
+              `✅ Bitrix24 updated for deal ${tokenData.entityId}`
             );
           } catch (bitrixError) {
             console.error(
-              "❌ Error actualizando Bitrix24:",
+              "❌ Error updating Bitrix24:",
               bitrixError.message
             );
           }
@@ -1776,7 +1776,7 @@ app.get("/authorize/return", async (req, res) => {
               entityId: tokenData.entityId,
             });
           } catch (emailError) {
-            console.error("❌ Error enviando email:", emailError.message);
+            console.error("❌ Error sending email:", emailError.message);
           }
 
           break;
@@ -1790,7 +1790,7 @@ app.get("/authorize/return", async (req, res) => {
       }&processor=Authorize.Net&transId=${transactionId || ""}`
     );
   } catch (error) {
-    console.error("❌ Error en return URL:", error);
+    console.error("❌ Error in return URL:", error);
     res.redirect(
       `${BASE_URL}/payment-success?amount=${transactionAmount || "0"}`
     );
@@ -1798,14 +1798,14 @@ app.get("/authorize/return", async (req, res) => {
 });
 
 app.post("/authorize/return", async (req, res) => {
-  console.log("✅ Authorize.Net Return URL llamada (POST)");
+  console.log("✅ Authorize.Net Return URL called (POST)");
   console.log("Body params:", req.body);
 
   const { x_trans_id, x_amount } = req.body;
 
   try {
     if (x_trans_id) {
-      console.log(`🔍 Procesando transacción vía POST: ${x_trans_id}`);
+      console.log(`🔍 Processing transaction via POST: ${x_trans_id}`);
     }
 
     res.redirect(
@@ -1814,33 +1814,33 @@ app.post("/authorize/return", async (req, res) => {
       }&processor=Authorize.Net&transId=${x_trans_id || ""}`
     );
   } catch (error) {
-    console.error("❌ Error en return URL (POST):", error);
+    console.error("❌ Error in return URL (POST):", error);
     res.redirect(`${BASE_URL}/payment-success`);
   }
 });
 
 // =====================================
-// PAGO DIRECTO DESDE WEB (SIN EMAIL / SIN PÁGINA INTERMEDIA)
+// DIRECT PAYMENT FROM WEB (NO EMAIL / NO INTERMEDIATE PAGE)
 // =====================================
 app.get("/pay-direct", async (req, res) => {
-  console.log("💳 PAGO DIRECTO /pay-direct");
+  console.log("💳 DIRECT PAYMENT /pay-direct");
 
   try {
-    // Parámetros opcionales desde la URL
+    // Optional parameters from URL
     const amountParam = req.query.amount;
     const nameParam = req.query.name;
     const referenceParam = req.query.reference;
 
-    // Monto por defecto si no mandas nada
+    // Default amount if nothing is sent
     const amount =
       amountParam && parseFloat(amountParam) > 0 ? amountParam : "20.80";
 
-    const customerName = nameParam || "Cliente Web";
-    const customerEmail = "webpayment@ensurityexpress.com"; // correo genérico
+    const customerName = nameParam || "Web Customer";
+    const customerEmail = "webpayment@ensurityexpress.com"; // generic email
     const entityId = referenceParam || "WEB_PAYMENT";
     const entityType = "web";
 
-    console.log("🔄 Creando HPP directo para:", {
+    console.log("🔄 Creating direct HPP for:", {
       amount,
       customerName,
       customerEmail,
@@ -1848,7 +1848,7 @@ app.get("/pay-direct", async (req, res) => {
       entityType,
     });
 
-    // Creamos un token interno para seguir rastreando esta sesión si hace falta
+    // Create an internal token to keep tracking this session if needed
     const token = generateSecureToken();
     const tokenData = {
       entityId,
@@ -1862,7 +1862,7 @@ app.get("/pay-direct", async (req, res) => {
     };
     paymentTokens.set(token, tokenData);
 
-    // Generar Hosted Payment Page en Authorize.Net
+    // Generate Hosted Payment Page in Authorize.Net
     const hppResult = await authorizeService.createHostedPaymentPage({
       amount,
       customerName,
@@ -1872,29 +1872,29 @@ app.get("/pay-direct", async (req, res) => {
     });
 
     if (!hppResult || !hppResult.success) {
-      console.error("❌ Error HPP (estructura inesperada):", hppResult);
+      console.error("❌ Error HPP (unexpected structure):", hppResult);
       throw new Error(
-        hppResult?.error || "No se pudo generar la página de pago"
+        hppResult?.error || "Could not generate payment page"
       );
     }
 
-    // Guardar referencia de Authorize.Net en el token
+    // Save Authorize.Net reference in token
     tokenData.authorizeReferenceId = hppResult.referenceId;
     tokenData.authorizeToken = hppResult.token;
     tokenData.finalAmount = amount;
     paymentTokens.set(token, tokenData);
 
-    console.log("✅ HPP generado correctamente:", {
+    console.log("✅ HPP generated correctly:", {
       postUrl: hppResult.postUrl,
       referenceId: hppResult.referenceId,
       amount,
     });
 
-    // En lugar de redirigir directo a Authorize, usamos la misma página /payment/:token
-    // para respetar el banner + iframe. Redirigimos allí:
+    // Instead of redirecting directly to Authorize, use the same /payment/:token page
+    // to respect the banner + iframe. Redirect there:
     res.redirect(`/payment/${token}`);
   } catch (error) {
-    console.error("💥 Error en /pay-direct:", {
+    console.error("💥 Error in /pay-direct:", {
       message: error.message,
       responseStatus: error.response?.status,
       responseData: error.response?.data,
@@ -1902,23 +1902,23 @@ app.get("/pay-direct", async (req, res) => {
 
     res
       .status(500)
-      .send("Error al iniciar el pago. Intenta nuevamente más tarde.");
+      .send("Error starting payment. Try again later.");
   }
 });
 
 // =====================================
-// RUTA DE ÉXITO DE PAGO
+// PAYMENT SUCCESS ROUTE
 // =====================================
 app.get("/payment-success", (req, res) => {
   const { amount, reference, processor } = req.query;
 
-  console.log(`✅ Mostrando página de éxito para pago: $${amount}`);
+  console.log(`✅ Showing success page for payment: $${amount}`);
 
   res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Exitoso - Ensurity Express</title>
+    <title>Successful Payment - Ensurity Express</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1956,50 +1956,49 @@ app.get("/payment-success", (req, res) => {
 <body>
     <div class="container">
         <div class="success-icon">✅</div>
-        <h1>¡Pago exitoso!</h1>
-        <p>El pago ha sido procesado correctamente a través de ${
+        <h1>Payment Successful!</h1>
+        <p>The payment has been successfully processed through ${
           processor || "Authorize.Net"
         }.</p>
-        <p>Se ha enviado un comprobante a tu email con todos los detalles.</p>
-
+        <p>A receipt has been sent to your email with all the details.</p>
         ${
           amount
             ? `
         <div class="receipt">
-            <h3>📋 Resumen del pago</h3>
-            <p><strong>💰 Monto:</strong> $${amount}</p>
+            <h3>📋 Payment Summary</h3>
+            <p><strong>💰 Amount:</strong> $${amount}</p>
             ${
               reference
-                ? `<p><strong>🔢 Referencia:</strong> ${reference}</p>`
+                ? `<p><strong>🔢 Reference:</strong> ${reference}</p>`
                 : ""
             }
-            <p><strong>🏦 Procesador:</strong> ${
+            <p><strong>🏦 Processor:</strong> ${
               processor || "Authorize.Net"
             }</p>
-            <p><strong>🏪 Entorno:</strong> ${
-              authorizeService.useSandbox ? "SANDBOX (Pruebas)" : "PRODUCCIÓN"
+            <p><strong>🏪 Environment:</strong> ${
+              authorizeService.useSandbox ? "SANDBOX (Testing)" : "PRODUCTION"
             }</p>
-            <p><strong>📅 Fecha:</strong> ${new Date().toLocaleDateString()}</p>
-            <p><strong>⏰ Hora:</strong> ${new Date().toLocaleTimeString()}</p>
-            <p><strong>🔒 Estado:</strong> Completado</p>
+            <p><strong>📅 Date:</strong> ${new Date().toLocaleDateString()}</p>
+            <p><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</p>
+            <p><strong>🔒 Status:</strong> Completed</p>
         </div>
         `
             : ""
         }
 
         <p style="font-size: 12px; color: #6c757d;">
-            <strong>📧 Comprobante enviado a tu email</strong><br>
-            Guarda este comprobante para tus registros.
+            <strong>📧 Receipt sent to your email</strong><br>
+            Keep this receipt for your records.
         </p>
 
         <a href="${BASE_URL}" class="btn-home">
-            🏠 Volver al inicio
+            🏠 Return to Home
         </a>
 
         <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid #e9ecef;">
             <p style="font-size: 11px; color: #6c757d;">
                 <strong>Ensurity Express Payments</strong><br>
-                Procesado por Authorize.Net
+                Processed by Authorize.Net
             </p>
         </div>
     </div>
@@ -2023,14 +2022,14 @@ app.get("/payment-success", (req, res) => {
 });
 
 // =====================================
-// RUTAS PARA FALLOS Y CANCELACIONES
+// ROUTES FOR FAILURES AND CANCELLATIONS
 // =====================================
 app.get("/payment-failed", (req, res) => {
   res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Fallido - Ensurity Express</title>
+    <title>Payment Failed - Ensurity Express</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -2042,9 +2041,9 @@ app.get("/payment-failed", (req, res) => {
 <body>
     <div class="container">
         <div class="error-icon">❌</div>
-        <h1>Pago fallido</h1>
-        <p>El pago no pudo ser procesado. Por favor intenta nuevamente.</p>
-        <a href="javascript:history.back()" class="btn-retry">🔄 Reintentar pago</a>
+        <h1>Payment Failed</h1>
+        <p>The payment could not be processed. Please try again.</p>
+        <a href="javascript:history.back()" class="btn-retry">🔄 Retry Payment</a>
     </div>
 </body>
 </html>
@@ -2056,7 +2055,7 @@ app.get("/payment-cancelled", (req, res) => {
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pago Cancelado - Ensurity Express</title>
+    <title>Payment Cancelled - Ensurity Express</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .container { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 500px; }
@@ -2067,15 +2066,15 @@ app.get("/payment-cancelled", (req, res) => {
 <body>
     <div class="container">
         <div class="warning-icon">⚠️</div>
-        <h1>Pago cancelado</h1>
-        <p>Has cancelado el proceso de pago. Puedes intentarlo nuevamente cuando lo desees.</p>
+        <h1>Payment Cancelled</h1>
+        <p>You have cancelled the payment process. You can try again whenever you wish.</p>
     </div>
 </body>
 </html>
   `);
 });
 
-// Opcional: ruta de cancelación usada por Authorize.Net
+// Optional: cancellation route used by Authorize.Net
 app.get("/authorize/cancel", (req, res) => {
   res.redirect("/payment-cancelled");
 });
@@ -2090,13 +2089,13 @@ app.get("/health", (req, res) => {
     email: v.contactEmail,
     flowType: v.flowType || "unknown",
     amount: v.dealAmount || "N/A",
-    authorizeReference: v.authorizeReferenceId || "No asignada",
+    authorizeReference: v.authorizeReferenceId || "Not assigned",
     expires: new Date(v.expires).toISOString(),
   }));
 
   res.json({
     status: "OK",
-    server: "Ensurity Express Payments con Authorize.Net v1.0",
+    server: "Ensurity Express Payments with Authorize.Net v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
     endpoints: {
@@ -2120,7 +2119,7 @@ app.get("/health", (req, res) => {
       hasTransactionKey: !!authorizeService.transactionKey,
       apiLoginId: authorizeService.apiLoginId
         ? `${authorizeService.apiLoginId.substring(0, 4)}...`
-        : "No configurado",
+        : "Not configured",
     },
     sessions: {
       active: paymentTokens.size,
@@ -2134,7 +2133,7 @@ app.get("/health", (req, res) => {
 });
 
 // =====================================
-// DEBUG HPP PRODUCCIÓN
+// DEBUG HPP PRODUCTION
 // =====================================
 app.post("/api/debug-hpp-production", async (req, res) => {
   try {
@@ -2153,7 +2152,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
       },
     };
 
-    console.log("📤 DEBUG - Enviando a PRODUCCIÓN:", {
+    console.log("📤 DEBUG - Sending to PRODUCTION:", {
       url: "https://api.authorize.net/xml/v1/request.api",
       payload: {
         ...testPayload,
@@ -2171,7 +2170,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
     );
 
     console.log(
-      "✅ DEBUG - Respuesta PRODUCCIÓN:",
+      "✅ DEBUG - PRODUCTION Response:",
       JSON.stringify(response.data, null, 2)
     );
 
@@ -2190,7 +2189,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
       );
     }
   } catch (error) {
-    console.error("💥 DEBUG - Error PRODUCCIÓN:", {
+    console.error("💥 DEBUG - PRODUCTION Error:", {
       status: error.response?.status,
       data: error.response?.data,
       message: error.message,
@@ -2216,17 +2215,17 @@ app.get("/widget/bitrix24", (req, res) => {
     <html>
       <body style="font-family: Arial, sans-serif; padding: 20px; background: #f4f4f4;">
         <div style="max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h1>🧪 Testing Widget Bitrix24</h1>
+          <h1>🧪 Testing Bitrix24 Widget</h1>
           <p>Testing <strong>${testEntityType}</strong> ID: <strong>${testEntityId}</strong></p>
           <button onclick="testPost()" style="background: #af100a; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
-            Probar Widget POST
+            Test Widget POST
           </button>
           <div id="result" style="margin-top: 20px;"></div>
         </div>
         <script>
           async function testPost() {
             const resultDiv = document.getElementById('result');
-            resultDiv.innerHTML = '<p>⏳ Cargando widget...</p>';
+            resultDiv.innerHTML = '<p>⏳ Loading widget...</p>';
 
             try {
               const response = await fetch('/widget/bitrix24', {
@@ -2254,11 +2253,11 @@ app.get("/widget/bitrix24", (req, res) => {
 });
 
 // =====================================
-// Ruta raíz
+// Root route
 // =====================================
 app.get("/", (req, res) => {
   res.json({
-    message: "Ensurity Express Payments API con Authorize.Net",
+    message: "Ensurity Express Payments API with Authorize.Net",
     version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
@@ -2267,38 +2266,38 @@ app.get("/", (req, res) => {
       widget: "/widget/bitrix24",
       payment: "/payment/{token}",
       debugHpp: "/api/debug-hpp-production",
-      documentation: "Ver /health para todos los endpoints",
+      documentation: "See /health for all endpoints",
     },
   });
 });
 
 // =====================================
-// Manejo de errores global
+// Global error handling
 // =====================================
 app.use((err, req, res, next) => {
-  console.error("💥 Error global:", err);
+  console.error("💥 Global Error:", err);
   res.status(500).json({
     success: false,
-    error: "Error interno del servidor",
+    error: "Internal server error",
     details: err.message,
   });
 });
 
 // =====================================
-// Inicializar servidor
+// Initialize server
 // =====================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(
-    `🚀 Servidor Ensurity Express Payments con Authorize.Net ejecutándose en puerto ${PORT}`
+    `🚀 Ensurity Express Payments with Authorize.Net server running on port ${PORT}`
   );
-  console.log(`🔗 URL Base: ${BASE_URL}`);
+  console.log(`🔗 Base URL: ${BASE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
-  console.log(`💳 Pagos: GET ${BASE_URL}/payment/{token}`);
-  console.log(`✅ Éxito: GET ${BASE_URL}/payment-success`);
+  console.log(`💳 Payments: GET ${BASE_URL}/payment/{token}`);
+  console.log(`✅ Success: GET ${BASE_URL}/payment-success`);
   console.log(`📧 Email: POST ${BASE_URL}/api/send-payment-email`);
-  console.log(`💳 Procesar: POST ${BASE_URL}/api/process-payment`);
+  console.log(`💳 Process: POST ${BASE_URL}/api/process-payment`);
   console.log(
     `🔗 Authorize Generate: POST ${BASE_URL}/api/generate-authorize-link`
   );
