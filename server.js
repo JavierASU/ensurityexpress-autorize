@@ -255,7 +255,14 @@ class AuthorizeNetService {
         email: paymentData.customerEmail,
         amount: paymentData.amount,
         entity: `${paymentData.entityType}-${paymentData.entityId}`,
+        description: paymentData.description || null,
       });
+
+      // 🔹 Description personalizada (si viene) o la genérica de antes
+      const description =
+        paymentData.description && paymentData.description.trim().length > 0
+          ? paymentData.description.trim()
+          : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
 
       const tokenPayload = {
         getHostedPaymentPageRequest: {
@@ -268,10 +275,7 @@ class AuthorizeNetService {
             amount: paymentData.amount.toString(),
             order: {
               invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-              // 🔹 AQUÍ ACEPTAMOS DESCRIPTION PERSONALIZADA
-              description:
-                paymentData.description ||
-                `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
+              description,
             },
             customer: {
               email: paymentData.customerEmail,
@@ -523,7 +527,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `You've received an invoice 1 from Ensurity Express - Customer: ${clientName}`,
+      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer: ${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -1140,9 +1144,6 @@ app.post("/webhook/bitrix24", async (req, res) => {
 });
 
 // =====================================
-// PAYMENT ROUTE WITH TOKEN (BANNER + IFRAME HPP)
-// =====================================
-// =====================================
 // PAYMENT ROUTE WITH TOKEN (BANNER + HPP IN IFRAME)
 // =====================================
 app.get("/payment/:token", async (req, res) => {
@@ -1551,7 +1552,8 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
-      // aquí no mandamos description, usa la genérica
+      // descripción aquí se maneja solo para /pay-direct, así que no
+      // pasamos nada en este flujo para no cambiar el comportamiento actual
     });
 
     tokenData.authorizeReferenceId = hppResult.referenceId;
@@ -1667,7 +1669,10 @@ app.post("/api/process-payment", async (req, res) => {
       authResponse: authResult.fullResponse,
     });
   } catch (error) {
-    console.error("❌ Error processing payment with Authorize.Net:", error.message);
+    console.error(
+      "❌ Error processing payment with Authorize.Net:",
+      error.message
+    );
 
     res.status(500).json({
       success: false,
@@ -1834,6 +1839,7 @@ app.get("/pay-direct", async (req, res) => {
     const amountParam = req.query.amount;
     const nameParam = req.query.name;
     const referenceParam = req.query.reference;
+    const descriptionParam = req.query.description; // ← descripción opcional
 
     // Default amount if nothing is sent
     const amount =
@@ -1844,26 +1850,13 @@ app.get("/pay-direct", async (req, res) => {
     const entityId = referenceParam || "WEB_PAYMENT";
     const entityType = "web";
 
-    // 🔹 LÓGICA DE DESCRIPCIÓN POR PLAN/MONTO
-    let description = `Payment for ${entityType} ${entityId}`;
-
-    if (amount === "1995.00" || amount === "1995" || entityId === "PLAN1995") {
-      description = "Professional Tax Software and Training";
-    } else if (
-      amount === "995.00" ||
-      amount === "995" ||
-      entityId === "PLAN995"
-    ) {
-      description = "Professional Tax Software";
-    }
-
     console.log("🔄 Creating direct HPP for:", {
       amount,
       customerName,
       customerEmail,
       entityId,
       entityType,
-      description,
+      description: descriptionParam || null,
     });
 
     // Create an internal token to keep tracking this session if needed
@@ -1874,6 +1867,7 @@ app.get("/pay-direct", async (req, res) => {
       contactEmail: customerEmail,
       contactName: customerName,
       dealAmount: amount,
+      description: descriptionParam || null,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "web_direct",
@@ -1887,7 +1881,7 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
-      description, // 👈 descripción personalizada para Authorize.Net
+      description: descriptionParam, // ← aquí mandamos la descripción al HPP
     });
 
     if (!hppResult || !hppResult.success) {
@@ -1907,6 +1901,7 @@ app.get("/pay-direct", async (req, res) => {
       postUrl: hppResult.postUrl,
       referenceId: hppResult.referenceId,
       amount,
+      description: descriptionParam || null,
     });
 
     // Instead of redirecting directly to Authorize, use the same /payment/:token page
@@ -2221,6 +2216,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
     });
   }
 });
+
 
 // =====================================
 // Ruta GET para testing del widget
