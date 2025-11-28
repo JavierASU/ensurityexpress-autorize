@@ -268,7 +268,10 @@ class AuthorizeNetService {
             amount: paymentData.amount.toString(),
             order: {
               invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
+              // 🔹 AQUÍ ACEPTAMOS DESCRIPTION PERSONALIZADA
+              description:
+                paymentData.description ||
+                `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
             },
             customer: {
               email: paymentData.customerEmail,
@@ -520,7 +523,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer: ${clientName}`,
+      subject: `You've received an invoice 1 from Ensurity Express - Customer: ${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -1548,6 +1551,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
+      // aquí no mandamos description, usa la genérica
     });
 
     tokenData.authorizeReferenceId = hppResult.referenceId;
@@ -1840,12 +1844,26 @@ app.get("/pay-direct", async (req, res) => {
     const entityId = referenceParam || "WEB_PAYMENT";
     const entityType = "web";
 
+    // 🔹 LÓGICA DE DESCRIPCIÓN POR PLAN/MONTO
+    let description = `Payment for ${entityType} ${entityId}`;
+
+    if (amount === "1995.00" || amount === "1995" || entityId === "PLAN1995") {
+      description = "Professional Tax Software and Training";
+    } else if (
+      amount === "995.00" ||
+      amount === "995" ||
+      entityId === "PLAN995"
+    ) {
+      description = "Professional Tax Software";
+    }
+
     console.log("🔄 Creating direct HPP for:", {
       amount,
       customerName,
       customerEmail,
       entityId,
       entityType,
+      description,
     });
 
     // Create an internal token to keep tracking this session if needed
@@ -1869,6 +1887,7 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
+      description, // 👈 descripción personalizada para Authorize.Net
     });
 
     if (!hppResult || !hppResult.success) {
