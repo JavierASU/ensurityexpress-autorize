@@ -247,39 +247,39 @@ class AuthorizeNetService {
   }
 
   // Create Hosted Payment Page (HPP) for Accept Hosted
-  async createHostedPaymentPage(paymentData) {
-    try {
-      console.log("🔄 Creating hosted payment page...");
-      console.log("📝 Payment data:", {
-        client: paymentData.customerName,
-        email: paymentData.customerEmail,
-        amount: paymentData.amount,
-        entity: `${paymentData.entityType}-${paymentData.entityId}`,
-        description: paymentData.description || null,
-      });
+async createHostedPaymentPage(paymentData) {
+  try {
+    console.log("🔄 Creating hosted payment page...");
+    console.log("📝 Payment data:", {
+      client: paymentData.customerName,
+      email: paymentData.customerEmail,
+      amount: paymentData.amount,
+      entity: `${paymentData.entityType}-${paymentData.entityId}`,
+      description: paymentData.description || null, // ← Log de descripción
+    });
 
-      // 🔹 Description personalizada (si viene) o la genérica de antes
-      const description =
-        paymentData.description && paymentData.description.trim().length > 0
-          ? paymentData.description.trim()
-          : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+    // 🔹 Usar descripción personalizada si viene, sino la genérica
+    const description =
+      paymentData.description && paymentData.description.trim().length > 0
+        ? paymentData.description.trim()
+        : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
 
-      const tokenPayload = {
-        getHostedPaymentPageRequest: {
-          merchantAuthentication: {
-            name: this.apiLoginId,
-            transactionKey: this.transactionKey,
+    const tokenPayload = {
+      getHostedPaymentPageRequest: {
+        merchantAuthentication: {
+          name: this.apiLoginId,
+          transactionKey: this.transactionKey,
+        },
+        transactionRequest: {
+          transactionType: "authCaptureTransaction",
+          amount: paymentData.amount.toString(),
+          order: {
+            invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
+            description: description, // ← Usar la descripción calculada
           },
-          transactionRequest: {
-            transactionType: "authCaptureTransaction",
-            amount: paymentData.amount.toString(),
-            order: {
-              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-              description,
-            },
-            customer: {
-              email: paymentData.customerEmail,
-            },
+          customer: {
+            email: paymentData.customerEmail,
+          },
           },
           hostedPaymentSettings: {
             setting: [
@@ -1831,6 +1831,9 @@ app.post("/authorize/return", async (req, res) => {
 // =====================================
 // DIRECT PAYMENT FROM WEB (NO EMAIL / NO INTERMEDIATE PAGE)
 // =====================================
+// =====================================
+// DIRECT PAYMENT FROM WEB (NO EMAIL / NO INTERMEDIATE PAGE)
+// =====================================
 app.get("/pay-direct", async (req, res) => {
   console.log("💳 DIRECT PAYMENT /pay-direct");
 
@@ -1839,7 +1842,7 @@ app.get("/pay-direct", async (req, res) => {
     const amountParam = req.query.amount;
     const nameParam = req.query.name;
     const referenceParam = req.query.reference;
-    const descriptionParam = req.query.description; // ← descripción opcional
+    const descriptionParam = req.query.description; // ← NUEVO parámetro
 
     // Default amount if nothing is sent
     const amount =
@@ -1856,7 +1859,7 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
-      description: descriptionParam || null,
+      description: descriptionParam || null, // ← Log del nuevo parámetro
     });
 
     // Create an internal token to keep tracking this session if needed
@@ -1867,7 +1870,7 @@ app.get("/pay-direct", async (req, res) => {
       contactEmail: customerEmail,
       contactName: customerName,
       dealAmount: amount,
-      description: descriptionParam || null,
+      description: descriptionParam || null, // ← Guardar descripción
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "web_direct",
@@ -1881,7 +1884,7 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
-      description: descriptionParam, // ← aquí mandamos la descripción al HPP
+      description: descriptionParam, // ← Pasar descripción al HPP
     });
 
     if (!hppResult || !hppResult.success) {
@@ -1901,7 +1904,7 @@ app.get("/pay-direct", async (req, res) => {
       postUrl: hppResult.postUrl,
       referenceId: hppResult.referenceId,
       amount,
-      description: descriptionParam || null,
+      description: descriptionParam || null, // ← Log de confirmación
     });
 
     // Instead of redirecting directly to Authorize, use the same /payment/:token page
