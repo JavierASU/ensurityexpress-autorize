@@ -15,6 +15,7 @@ const app = express();
 // =========================
 const BASE_URL =
   process.env.BASE_URL || "https://kqgavtfrpt.us-east-1.awsapprunner.com";
+const WEBSITE_URL = "https://ensurityexpress.com";
 
 console.log(`🔗 URL Base configurada: ${BASE_URL}`);
 
@@ -104,7 +105,7 @@ class AuthorizeNetService {
     return this.useSandbox ? this.sandboxUrl : this.productionUrl;
   }
 
-  // 🔹 MODIFICADO: SIEMPRE usar formato EX000XL00TX
+  // 🔹 SIEMPRE usar formato EX000XL00TX
   buildInvoiceNumber(entityId = "WEB") {
     const numId = parseInt(entityId) || 0;
     const paddedId = numId.toString().padStart(3, '0');
@@ -542,7 +543,7 @@ async function sendPaymentEmail(
         process.env.SMTP_USER || "invoice@ensurityexpress.com"
       }>`,
       to: email,
-      subject: `You've received an invoice 1 from Ensurity Express Tax Solutions - Customer: ${clientName}`,
+      subject: `Payment Invoice from Ensurity Express - Customer: ${clientName}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -563,8 +564,8 @@ async function sendPaymentEmail(
 </head>
 <body>
     <div class="header">
-        <h1>Ensurity Express Payments</h1>
-        <p>Secure Payment System with Authorize.Net</p>
+        <h1>Ensurity Express Tax Solutions</h1>
+        <p>Secure Payment System</p>
     </div>
 
     <div class="content">
@@ -573,15 +574,15 @@ async function sendPaymentEmail(
 
         <div class="amount-info">
             <p><strong>Invoice Number:</strong> ${invoiceNumber}</p>
-            <p><strong>Reference:</strong> Customer:${clientName}</p>
-            <p><strong>Amount to pay:</strong> <strong>$${dealAmount} USD</strong></p>
+            <p><strong>Customer:</strong> ${clientName}</p>
+            <p><strong>Amount:</strong> <strong>$${dealAmount} USD</strong></p>
         </div>
 
-        <p>To complete your payment, click the button below. You will be taken directly to the secure payment portal of Authorize.Net:</p>
+        <p>To complete your payment, click the button below:</p>
 
         <div style="text-align: center; margin: 24px 0;">
             <a href="${paymentLink}" class="payment-link" target="_blank">
-                💳 VIEW AND PAY INVOICE
+                💳 PAY INVOICE NOW
             </a>
         </div>
 
@@ -589,7 +590,7 @@ async function sendPaymentEmail(
         <ul>
             <li>This link is valid for 24 hours.</li>
             <li>The amount of <strong>$${dealAmount} USD</strong> is fixed for this transaction.</li>
-            <li>Payment is processed through Authorize.Net in an encrypted environment.</li>
+            <li>Payment is processed through our secure payment system.</li>
         </ul>
 
         <p>If you have any questions, please contact us.</p>
@@ -598,7 +599,7 @@ Ensurity Express Tax Solutions<br>
 935 W RALPH HALL PKWY 101<br>
 ROCKWALL TX, 75032<br>
 469-4847873<br>
-.</p>
+</p>
     </div>
 
     <div class="footer">
@@ -643,27 +644,21 @@ async function sendPaymentConfirmation(email, paymentData) {
 <body>
     <div class="header">
         <h1>✅ Payment Confirmed</h1>
-        <p>Ensurity Express Payments</p>
+        <p>Ensurity Express Tax Solutions</p>
     </div>
 
     <div class="content">
         <h2>Hello ${paymentData.clientName},</h2>
-        <p>Your payment has been successfully processed through Authorize.Net.</p>
+        <p>Your payment has been successfully processed.</p>
 
         <div class="receipt">
             <h3>📋 Payment Receipt</h3>
             <p><strong>Invoice Number:</strong> ${paymentData.invoiceNumber || 'N/A'}</p>
+            <p><strong>Customer:</strong> ${paymentData.clientName}</p>
             <p><strong>Amount:</strong> $${paymentData.amount}</p>
             <p><strong>Transaction ID:</strong> ${
               paymentData.transactionId
             }</p>
-            <p><strong>Authorization Code:</strong> ${
-              paymentData.authCode || "N/A"
-            }</p>
-            <p><strong>Reference:</strong> ${
-              paymentData.referenceId || paymentData.transactionId
-            }</p>
-            <p><strong>Processor:</strong> Authorize.Net</p>
             <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
             <p><strong>Time:</strong> ${new Date().toLocaleTimeString()}</p>
         </div>
@@ -674,7 +669,7 @@ async function sendPaymentConfirmation(email, paymentData) {
     </div>
 
     <div class="footer">
-        <p>Ensurity Express Payments System<br>
+        <p>Ensurity Express Tax Solutions<br>
         <small>This is an automated email, please do not reply to this message.</small></p>
     </div>
 </body>
@@ -803,7 +798,7 @@ app.post("/widget/bitrix24", async (req, res) => {
             <div class="widget-container">
                 <div class="header">
                     <h2>Ensurity Express Payments</h2>
-                    <p>Payment system with Authorize.Net</p>
+                    <p>Secure payment system</p>
                 </div>
                 <div class="content">
                     <div class="warning">
@@ -876,7 +871,7 @@ app.post("/widget/bitrix24", async (req, res) => {
     <div class="widget-container">
         <div class="header">
             <h2>Ensurity Express Payments</h2>
-            <p>Sistema de pagos con Authorize.Net</p>
+            <p>Secure payment system</p>
         </div>
 
         <div class="content">
@@ -913,11 +908,11 @@ app.post("/widget/bitrix24", async (req, res) => {
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
-                🎯 Generate Authorize.Net payment link
+                🎯 Generate payment link
             </button>
 
             <button class="btn btn-success" onclick="sendPaymentEmailToClient()">
-                📧 Send link by email (fixed amount)
+                📧 Send link by email
             </button>
 
             <button class="btn btn-secondary" onclick="testConnection()">
@@ -959,15 +954,16 @@ app.post("/widget/bitrix24", async (req, res) => {
                 const result = await response.json();
 
                 if (result.success) {
+                    const paymentLink = result.paymentLink;
                     resultDiv.innerHTML =
                         '<div style="color: #af100a; text-align: center;">' +
                         '✅ <strong>Link generated successfully</strong></div><br>' +
                         '<strong>🔗 Secure payment link:</strong><br>' +
-                        '<div class="link-display">' + result.paymentLink + '</div><br>' +
+                        '<div class="link-display">' + paymentLink + '</div><br>' +
                         '<div class="amount-info">' +
                         '<strong>💡 Note:</strong> The client can modify the amount on the payment portal.' +
                         '</div><br>' +
-                        '<button class="btn" onclick="copyToClipboard(\\'' + result.paymentLink + '\\')">📋 Copy link</button>' +
+                        '<button class="btn" onclick="copyToClipboard(\\'' + paymentLink + '\\')">📋 Copy link</button>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #ffeaea; border-radius: 5px; font-size: 11px; color: #af100a;">' +
                         '💡 Send this link to the client to complete the payment.' +
                         '</div>';
@@ -1009,11 +1005,11 @@ app.post("/widget/bitrix24", async (req, res) => {
                         '<div class="email-section">' +
                         '<strong>📧 Recipient:</strong> ' + CLIENT_EMAIL + '<br>' +
                         '<strong>👤 Client:</strong> ' + CLIENT_NAME + '<br>' +
-                        '<strong>💰 Predefined amount:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
+                        '<strong>💰 Amount:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
                         '<strong>🆔 Reference:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
                         '</div>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #d4edda; border-radius: 5px; font-size: 11px; color: #155724;">' +
-                        '💡 The client received the payment link by email with the fixed amount set.' +
+                        '💡 The client received the payment link by email.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -1040,7 +1036,6 @@ app.post("/widget/bitrix24", async (req, res) => {
                     '<div style="text-align: left; font-size: 11px;">' +
                     '<div><strong>Server:</strong> ' + result.server + '</div>' +
                     '<div><strong>URL:</strong> ' + SERVER_URL + '</div>' +
-                    '<div><strong>Authorize.Net:</strong> ' + (result.authorize?.environment || 'Not configured') + '</div>' +
                     '</div>';
                 resultDiv.className = 'result success';
             } catch (error) {
@@ -1050,9 +1045,38 @@ app.post("/widget/bitrix24", async (req, res) => {
         }
 
         function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(() => {
-                alert('✅ Link copied to clipboard');
-            });
+            // Usando el API moderno de clipboard
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('✅ Link copied to clipboard!');
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                    fallbackCopyToClipboard(text);
+                });
+            } else {
+                fallbackCopyToClipboard(text);
+            }
+        }
+
+        function fallbackCopyToClipboard(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                alert('✅ Link copied to clipboard!');
+            } catch (err) {
+                console.error('Fallback: Oops, unable to copy', err);
+                alert('❌ Failed to copy link. Please copy manually.');
+            }
+            
+            document.body.removeChild(textArea);
         }
 
         window.addEventListener('load', function () {
@@ -1132,7 +1156,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "direct_link",
-      isEmailFlow: false, // 🔹 NO es flujo de email
+      isEmailFlow: false,
     };
 
     paymentTokens.set(token, tokenData);
@@ -1349,15 +1373,14 @@ app.get("/payment/:token", async (req, res) => {
   <!-- 🟥 Top banner: here you control logo/texts so it looks the same as the image -->
   <div class="top-banner">
     <div class="banner-left">
-      <!-- Change the logo URL to yours -->
-   <img
-  class="banner-logo"
-  src="/imagenes/logo-blanco-ee.png"
-  alt="Ensurity Express Logo"
-/>
- <div class="banner-title">
+      <img
+        class="banner-logo"
+        src="/imagenes/logo-blanco-ee.png"
+        alt="Ensurity Express Logo"
+      />
+      <div class="banner-title">
         <div class="banner-title-main">Ensurity Express Tax Solutions</div>
-        <div class="banner-title-sub">Processed with Authorize.net</div>
+        <div class="banner-title-sub">Secure Payment Portal</div>
       </div>
     </div>
     <div class="banner-right">
@@ -1491,7 +1514,7 @@ app.post("/api/send-payment-email", async (req, res) => {
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "email",
-      isEmailFlow: true, // 🔹 IMPORTANTE: Marcar como flujo de email
+      isEmailFlow: true,
     };
 
     paymentTokens.set(token, tokenData);
@@ -1573,7 +1596,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
-      isEmailFlow: tokenData.isEmailFlow || false, // 🔹 Pasar si es flujo de email
+      isEmailFlow: tokenData.isEmailFlow || false,
     });
 
     tokenData.authorizeReferenceId = hppResult.referenceId;
@@ -1646,7 +1669,7 @@ app.post("/api/process-payment", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
-      isEmailFlow: tokenData.isEmailFlow || false, // 🔹 Pasar si es flujo de email
+      isEmailFlow: tokenData.isEmailFlow || false,
     });
 
     console.log("✅ Authorize.Net Result:", authResult);
@@ -1660,7 +1683,6 @@ app.post("/api/process-payment", async (req, res) => {
       invoiceNumber: authResult.invoiceNumber,
       entityType: tokenData.entityType,
       entityId: tokenData.entityId,
-      processor: "Authorize.Net",
     });
 
     try {
@@ -1820,7 +1842,7 @@ app.get("/authorize/return", async (req, res) => {
     res.redirect(
       `${BASE_URL}/payment-success?amount=${
         transactionAmount || "0"
-      }&processor=Authorize.Net&transId=${transactionId || ""}`
+      }&transId=${transactionId || ""}`
     );
   } catch (error) {
     console.error("❌ Error in return URL:", error);
@@ -1844,7 +1866,7 @@ app.post("/authorize/return", async (req, res) => {
     res.redirect(
       `${BASE_URL}/payment-success?amount=${
         x_amount || "0"
-      }&processor=Authorize.Net&transId=${x_trans_id || ""}`
+      }&transId=${x_trans_id || ""}`
     );
   } catch (error) {
     console.error("❌ Error in return URL (POST):", error);
@@ -1895,7 +1917,7 @@ app.get("/pay-direct", async (req, res) => {
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "web_direct",
-      isEmailFlow: false, // 🔹 NO es flujo de email
+      isEmailFlow: false,
     };
     paymentTokens.set(token, tokenData);
 
@@ -1907,7 +1929,7 @@ app.get("/pay-direct", async (req, res) => {
       entityId,
       entityType,
       description: descriptionParam,
-      isEmailFlow: false, // 🔹 NO es flujo de email
+      isEmailFlow: false,
     });
 
     if (!hppResult || !hppResult.success) {
@@ -1948,7 +1970,7 @@ app.get("/pay-direct", async (req, res) => {
 // PAYMENT SUCCESS ROUTE
 // =====================================
 app.get("/payment-success", (req, res) => {
-  const { amount, reference, processor } = req.query;
+  const { amount, transId } = req.query;
 
   console.log(`✅ Showing success page for payment: $${amount}`);
 
@@ -1995,9 +2017,7 @@ app.get("/payment-success", (req, res) => {
     <div class="container">
         <div class="success-icon">✅</div>
         <h1>Payment Successful!</h1>
-        <p>The payment has been successfully processed through ${
-          processor || "Authorize.Net"
-        }.</p>
+        <p>The payment has been successfully processed.</p>
         <p>A receipt has been sent to your email with all the details.</p>
         ${
           amount
@@ -2006,16 +2026,10 @@ app.get("/payment-success", (req, res) => {
             <h3>📋 Payment Summary</h3>
             <p><strong>💰 Amount:</strong> $${amount}</p>
             ${
-              reference
-                ? `<p><strong>🔢 Reference:</strong> ${reference}</p>`
+              transId
+                ? `<p><strong>🔢 Transaction ID:</strong> ${transId}</p>`
                 : ""
             }
-            <p><strong>🏦 Processor:</strong> ${
-              processor || "Authorize.Net"
-            }</p>
-            <p><strong>🏪 Environment:</strong> ${
-              authorizeService.useSandbox ? "SANDBOX (Testing)" : "PRODUCTION"
-            }</p>
             <p><strong>📅 Date:</strong> ${new Date().toLocaleDateString()}</p>
             <p><strong>⏰ Time:</strong> ${new Date().toLocaleTimeString()}</p>
             <p><strong>🔒 Status:</strong> Completed</p>
@@ -2029,14 +2043,14 @@ app.get("/payment-success", (req, res) => {
             Keep this receipt for your records.
         </p>
 
-        <a href="${BASE_URL}" class="btn-home">
-            🏠 Return to Home
+        <a href="${WEBSITE_URL}" class="btn-home">
+            🏠 Return to EnsurityExpress.com
         </a>
 
         <div style="margin-top: 20px; padding-top: 18px; border-top: 1px solid #e9ecef;">
             <p style="font-size: 11px; color: #6c757d;">
-                <strong>Ensurity Express Payments</strong><br>
-                Processed by Authorize.Net
+                <strong>Ensurity Express Tax Solutions</strong><br>
+                Secure Payment System
             </p>
         </div>
     </div>
@@ -2134,9 +2148,10 @@ app.get("/health", (req, res) => {
 
   res.json({
     status: "OK",
-    server: "Ensurity Express Payments with Authorize.Net v1.0",
+    server: "Ensurity Express Payments v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
+    websiteUrl: WEBSITE_URL,
     invoiceFormat: "EX000XL00TX (Siempre)",
     endpoints: {
       widget: "POST /widget/bitrix24",
@@ -2298,10 +2313,11 @@ app.get("/widget/bitrix24", (req, res) => {
 // =====================================
 app.get("/", (req, res) => {
   res.json({
-    message: "Ensurity Express Payments API with Authorize.Net",
+    message: "Ensurity Express Payments API",
     version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
+    websiteUrl: WEBSITE_URL,
     invoiceFormat: "EX000XL00TX (Siempre)",
     descriptionBehavior: "Email flow: Client Name, Others: Generic",
     endpoints: {
@@ -2332,9 +2348,10 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(
-    `🚀 Ensurity Express Payments with Authorize.Net server running on port ${PORT}`
+    `🚀 Ensurity Express Payments server running on port ${PORT}`
   );
   console.log(`🔗 Base URL: ${BASE_URL}`);
+  console.log(`🌐 Website: ${WEBSITE_URL}`);
   console.log(`🎯 Widget: POST ${BASE_URL}/widget/bitrix24`);
   console.log(`🔗 Webhook: POST ${BASE_URL}/webhook/bitrix24`);
   console.log(`💳 Payments: GET ${BASE_URL}/payment/{token}`);
@@ -2352,7 +2369,7 @@ app.listen(PORT, () => {
   console.log(
     `🏦 Authorize.Net: ${
       authorizeService.useSandbox ? "SANDBOX" : "PRODUCTION"
-    } - ${authorizeService.getBaseUrl()}`
+    }`
   );
   console.log(`📄 Invoice Format: EX000XL00TX (Siempre)`);
 });
