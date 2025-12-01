@@ -104,23 +104,16 @@ class AuthorizeNetService {
     return this.useSandbox ? this.sandboxUrl : this.productionUrl;
   }
 
-  // 🔹 NUEVO: generador seguro de invoiceNumber
+  // 🔹 MODIFICADO: SIEMPRE usar formato EX000XL00TX
   buildInvoiceNumber(entityId = "WEB") {
-    // Quitar caracteres raros y limitar la parte del entityId
-    const cleanEntity = String(entityId)
-      .replace(/[^A-Za-z0-9]/g, "") // solo letras y números
-      .slice(0, 8); // máximo 8 chars para el id
-
-    const base = `INV-${cleanEntity || "WEB"}`; // ej: INV-PLAN995, INV-WEB
-    const shortTs = Date.now().toString().slice(-6); // últimos 6 dígitos del timestamp
-    let invoice = `${base}-${shortTs}`; // ej: INV-PLAN995-123456
-
-    // Recorta por si acaso al tamaño máximo permitido
-    if (invoice.length > this.INVOICE_MAX_LEN) {
-      invoice = invoice.slice(0, this.INVOICE_MAX_LEN);
-    }
-
-    return invoice;
+    const numId = parseInt(entityId) || 0;
+    const paddedId = numId.toString().padStart(3, '0');
+    
+    // Contador basado en timestamp (últimos 2 dígitos del segundo actual)
+    const timestamp = Date.now();
+    const counter = (Math.floor(timestamp / 1000) % 100).toString().padStart(2, '0');
+    
+    return `EX${paddedId}XL${counter}TX`;
   }
 
   generateReferenceId() {
@@ -131,6 +124,16 @@ class AuthorizeNetService {
   async createTransaction(amount, paymentData) {
     try {
       console.log("🔄 Creando transacción en Authorize.Net...");
+
+      // 🔹 Determinar descripción según contexto
+      let description;
+      if (paymentData.isEmailFlow) {
+        // Para flujo de email: usar nombre del cliente
+        description = `Payment for ${paymentData.customerName}`;
+      } else {
+        // Para otros flujos: descripción genérica
+        description = `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+      }
 
       const payload = {
         createTransactionRequest: {
@@ -149,9 +152,9 @@ class AuthorizeNetService {
               },
             },
             order: {
-              // 🔹 Using the secure invoiceNumber generator
+              // 🔹 SIEMPRE nuevo formato EX000XL00TX
               invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-              description: `Payment for ${paymentData.entityType} ${paymentData.entityId}`,
+              description: description,
             },
             customer: {
               email: paymentData.customerEmail,
@@ -247,39 +250,47 @@ class AuthorizeNetService {
   }
 
   // Create Hosted Payment Page (HPP) for Accept Hosted
-async createHostedPaymentPage(paymentData) {
-  try {
-    console.log("🔄 Creating hosted payment page...");
-    console.log("📝 Payment data:", {
-      client: paymentData.customerName,
-      email: paymentData.customerEmail,
-      amount: paymentData.amount,
-      entity: `${paymentData.entityType}-${paymentData.entityId}`,
-      description: paymentData.description || null, // ← Log de descripción
-    });
+  async createHostedPaymentPage(paymentData) {
+    try {
+      console.log("🔄 Creating hosted payment page...");
+      console.log("📝 Payment data:", {
+        client: paymentData.customerName,
+        email: paymentData.customerEmail,
+        amount: paymentData.amount,
+        entity: `${paymentData.entityType}-${paymentData.entityId}`,
+        description: paymentData.description || null,
+        isEmailFlow: paymentData.isEmailFlow || false,
+      });
 
-    // 🔹 Usar descripción personalizada si viene, sino la genérica
-    const description =
-      paymentData.description && paymentData.description.trim().length > 0
-        ? paymentData.description.trim()
-        : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+      // 🔹 Determinar descripción según contexto
+      let description;
+      if (paymentData.isEmailFlow) {
+        // Para flujo de email: usar nombre del cliente
+        description = `Payment for ${paymentData.customerName}`;
+      } else {
+        // Para otros flujos: descripción genérica o personalizada
+        description = paymentData.description && paymentData.description.trim().length > 0
+          ? paymentData.description.trim()
+          : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+      }
 
-    const tokenPayload = {
-      getHostedPaymentPageRequest: {
-        merchantAuthentication: {
-          name: this.apiLoginId,
-          transactionKey: this.transactionKey,
-        },
-        transactionRequest: {
-          transactionType: "authCaptureTransaction",
-          amount: paymentData.amount.toString(),
-          order: {
-            invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
-            description: description, // ← Usar la descripción calculada
+      const tokenPayload = {
+        getHostedPaymentPageRequest: {
+          merchantAuthentication: {
+            name: this.apiLoginId,
+            transactionKey: this.transactionKey,
           },
-          customer: {
-            email: paymentData.customerEmail,
-          },
+          transactionRequest: {
+            transactionType: "authCaptureTransaction",
+            amount: paymentData.amount.toString(),
+            order: {
+              // 🔹 SIEMPRE nuevo formato EX000XL00TX
+              invoiceNumber: this.buildInvoiceNumber(paymentData.entityId),
+              description: description,
+            },
+            customer: {
+              email: paymentData.customerEmail,
+            },
           },
           hostedPaymentSettings: {
             setting: [
@@ -294,7 +305,6 @@ async createHostedPaymentPage(paymentData) {
                 }),
               },
               {
-                // 🔹 IMPORTANT for IFRAME mode
                 settingName: "hostedPaymentIFrameCommunicatorUrl",
                 settingValue: JSON.stringify({
                   url: `${BASE_URL}/iframe-communicator`,
@@ -308,6 +318,8 @@ async createHostedPaymentPage(paymentData) {
       console.log("📤 Sending HPP request to Authorize.Net:", {
         url: `${this.getBaseUrl()}/xml/v1/request.api`,
         environment: this.useSandbox ? "SANDBOX" : "PRODUCTION",
+        invoiceNumber: tokenPayload.getHostedPaymentPageRequest.transactionRequest.order.invoiceNumber,
+        description: description,
       });
 
       const response = await axios.post(
@@ -513,14 +525,17 @@ async function sendPaymentEmail(
     if (!dealAmount && dealId) {
       try {
         const deal = await bitrix24.getDeal(dealId);
-        dealAmount = deal?.OPPORTUNITY || "20.80"; // Default value
+        dealAmount = deal?.OPPORTUNITY || "20.80";
       } catch (error) {
         console.error("Error getting deal amount:", error);
-        dealAmount = "20.80"; // Default value
+        dealAmount = "20.80";
       }
     } else if (!dealAmount) {
-      dealAmount = "20.80"; // Default value
+      dealAmount = "20.80";
     }
+
+    // 🔹 Generar invoice number para mostrar en email
+    const invoiceNumber = authorizeService.buildInvoiceNumber(dealId);
 
     const mailOptions = {
       from: `"Ensurity Express Payments" <${
@@ -557,6 +572,7 @@ async function sendPaymentEmail(
         <p>You have received a secure payment link to complete your transaction with <span class="brand">Ensurity Express</span>.</p>
 
         <div class="amount-info">
+            <p><strong>Invoice Number:</strong> ${invoiceNumber}</p>
             <p><strong>Reference:</strong> Customer:${clientName}</p>
             <p><strong>Amount to pay:</strong> <strong>$${dealAmount} USD</strong></p>
         </div>
@@ -595,7 +611,7 @@ ROCKWALL TX, 75032<br>
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to: ${email} with fixed amount: $${dealAmount}`);
+    console.log(`✅ Email sent to: ${email} with invoice: ${invoiceNumber}`);
     return info;
   } catch (error) {
     console.error("❌ Error sending email:", error);
@@ -636,6 +652,7 @@ async function sendPaymentConfirmation(email, paymentData) {
 
         <div class="receipt">
             <h3>📋 Payment Receipt</h3>
+            <p><strong>Invoice Number:</strong> ${paymentData.invoiceNumber || 'N/A'}</p>
             <p><strong>Amount:</strong> $${paymentData.amount}</p>
             <p><strong>Transaction ID:</strong> ${
               paymentData.transactionId
@@ -1115,6 +1132,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "direct_link",
+      isEmailFlow: false, // 🔹 NO es flujo de email
     };
 
     paymentTokens.set(token, tokenData);
@@ -1209,7 +1227,7 @@ app.get("/payment/:token", async (req, res) => {
     }
 
     console.log(
-      `✅ Token valid for: ${tokenData.contactName} (${tokenData.contactEmail}) - Flow: ${tokenData.flowType}`
+      `✅ Token valid for: ${tokenData.contactName} (${tokenData.contactEmail}) - Flow: ${tokenData.flowType}, isEmailFlow: ${tokenData.isEmailFlow}`
     );
 
     // Amount to be used in the HPP (email, widget, web, etc.)
@@ -1472,7 +1490,8 @@ app.post("/api/send-payment-email", async (req, res) => {
       dealAmount: dealAmount,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
-      flowType: "email", // 🔴 EMAIL FLOW (fixed amount)
+      flowType: "email",
+      isEmailFlow: true, // 🔹 IMPORTANTE: Marcar como flujo de email
     };
 
     paymentTokens.set(token, tokenData);
@@ -1495,6 +1514,7 @@ app.post("/api/send-payment-email", async (req, res) => {
       entityId: entityId,
       amount: dealAmount,
       flowType: "email",
+      invoiceNumber: authorizeService.buildInvoiceNumber(entityId),
     });
   } catch (error) {
     console.error("❌ Error sending email:", error);
@@ -1544,6 +1564,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`,
       flowType: tokenData.flowType,
+      isEmailFlow: tokenData.isEmailFlow || false,
     });
 
     const hppResult = await authorizeService.createHostedPaymentPage({
@@ -1552,8 +1573,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
-      // descripción aquí se maneja solo para /pay-direct, así que no
-      // pasamos nada en este flujo para no cambiar el comportamiento actual
+      isEmailFlow: tokenData.isEmailFlow || false, // 🔹 Pasar si es flujo de email
     });
 
     tokenData.authorizeReferenceId = hppResult.referenceId;
@@ -1614,6 +1634,7 @@ app.post("/api/process-payment", async (req, res) => {
       email: tokenData.contactEmail,
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`,
+      isEmailFlow: tokenData.isEmailFlow || false,
     });
 
     const authResult = await authorizeService.createTransaction(amount, {
@@ -1625,6 +1646,7 @@ app.post("/api/process-payment", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
+      isEmailFlow: tokenData.isEmailFlow || false, // 🔹 Pasar si es flujo de email
     });
 
     console.log("✅ Authorize.Net Result:", authResult);
@@ -1635,6 +1657,7 @@ app.post("/api/process-payment", async (req, res) => {
       transactionId: authResult.transactionId,
       authCode: authResult.authCode,
       referenceId: authResult.referenceId,
+      invoiceNumber: authResult.invoiceNumber,
       entityType: tokenData.entityType,
       entityId: tokenData.entityId,
       processor: "Authorize.Net",
@@ -1664,6 +1687,7 @@ app.post("/api/process-payment", async (req, res) => {
       transactionId: authResult.transactionId,
       authCode: authResult.authCode,
       referenceId: authResult.referenceId,
+      invoiceNumber: authResult.invoiceNumber,
       amount: amount,
       clientEmail: tokenData.contactEmail,
       authResponse: authResult.fullResponse,
@@ -1831,9 +1855,6 @@ app.post("/authorize/return", async (req, res) => {
 // =====================================
 // DIRECT PAYMENT FROM WEB (NO EMAIL / NO INTERMEDIATE PAGE)
 // =====================================
-// =====================================
-// DIRECT PAYMENT FROM WEB (NO EMAIL / NO INTERMEDIATE PAGE)
-// =====================================
 app.get("/pay-direct", async (req, res) => {
   console.log("💳 DIRECT PAYMENT /pay-direct");
 
@@ -1842,7 +1863,7 @@ app.get("/pay-direct", async (req, res) => {
     const amountParam = req.query.amount;
     const nameParam = req.query.name;
     const referenceParam = req.query.reference;
-    const descriptionParam = req.query.description; // ← NUEVO parámetro
+    const descriptionParam = req.query.description;
 
     // Default amount if nothing is sent
     const amount =
@@ -1859,7 +1880,7 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
-      description: descriptionParam || null, // ← Log del nuevo parámetro
+      description: descriptionParam || null,
     });
 
     // Create an internal token to keep tracking this session if needed
@@ -1870,10 +1891,11 @@ app.get("/pay-direct", async (req, res) => {
       contactEmail: customerEmail,
       contactName: customerName,
       dealAmount: amount,
-      description: descriptionParam || null, // ← Guardar descripción
+      description: descriptionParam || null,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "web_direct",
+      isEmailFlow: false, // 🔹 NO es flujo de email
     };
     paymentTokens.set(token, tokenData);
 
@@ -1884,7 +1906,8 @@ app.get("/pay-direct", async (req, res) => {
       customerEmail,
       entityId,
       entityType,
-      description: descriptionParam, // ← Pasar descripción al HPP
+      description: descriptionParam,
+      isEmailFlow: false, // 🔹 NO es flujo de email
     });
 
     if (!hppResult || !hppResult.success) {
@@ -1904,11 +1927,9 @@ app.get("/pay-direct", async (req, res) => {
       postUrl: hppResult.postUrl,
       referenceId: hppResult.referenceId,
       amount,
-      description: descriptionParam || null, // ← Log de confirmación
+      description: descriptionParam || null,
     });
 
-    // Instead of redirecting directly to Authorize, use the same /payment/:token page
-    // to respect the banner + iframe. Redirect there:
     res.redirect(`/payment/${token}`);
   } catch (error) {
     console.error("💥 Error in /pay-direct:", {
@@ -2105,6 +2126,7 @@ app.get("/health", (req, res) => {
     entity: `${v.entityType}-${v.entityId}`,
     email: v.contactEmail,
     flowType: v.flowType || "unknown",
+    isEmailFlow: v.isEmailFlow || false,
     amount: v.dealAmount || "N/A",
     authorizeReference: v.authorizeReferenceId || "Not assigned",
     expires: new Date(v.expires).toISOString(),
@@ -2115,6 +2137,7 @@ app.get("/health", (req, res) => {
     server: "Ensurity Express Payments with Authorize.Net v1.0",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
+    invoiceFormat: "EX000XL00TX (Siempre)",
     endpoints: {
       widget: "POST /widget/bitrix24",
       webhook: "POST /webhook/bitrix24",
@@ -2279,6 +2302,8 @@ app.get("/", (req, res) => {
     version: "1.0",
     status: "running",
     baseUrl: BASE_URL,
+    invoiceFormat: "EX000XL00TX (Siempre)",
+    descriptionBehavior: "Email flow: Client Name, Others: Generic",
     endpoints: {
       health: "/health",
       widget: "/widget/bitrix24",
@@ -2329,4 +2354,5 @@ app.listen(PORT, () => {
       authorizeService.useSandbox ? "SANDBOX" : "PRODUCTION"
     } - ${authorizeService.getBaseUrl()}`
   );
+  console.log(`📄 Invoice Format: EX000XL00TX (Siempre)`);
 });
