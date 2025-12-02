@@ -6,6 +6,7 @@ const morgan = require("morgan");
 const nodemailer = require("nodemailer");
 const axios = require("axios");
 const crypto = require("crypto");
+const path = require("path");
 require("dotenv").config();
 
 const app = express();
@@ -39,8 +40,6 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan("combined"));
-app.use("/imagenes", express.static("imagenes"));
-const path = require("path");
 app.use("/imagenes", express.static(path.join(__dirname, "imagenes")));
 
 // =========================
@@ -73,6 +72,185 @@ const paymentTokens = new Map();
 const clientDataStore = new Map();
 
 // =====================================
+// BITRIX24 CLASS
+// =====================================
+class Bitrix24 {
+  constructor() {
+    this.webhookUrl =
+      process.env.BITRIX24_WEBHOOK_URL ||
+      "https://ensurityexpress.bitrix24.com/rest/65/v6hyou7s4l7fpj5l";
+    this.productWebhookUrl = 
+      "https://ensurityexpress.bitrix24.com/rest/65/jyxsjzrx0nynhkou";
+  }
+
+  async getDeal(dealId) {
+    try {
+      console.log(`🔍 Getting deal ${dealId}...`);
+      const response = await axios.get(`${this.webhookUrl}/crm.deal.get`, {
+        params: { id: dealId },
+      });
+
+      if (response.data.result) {
+        console.log(`✅ Deal obtained:`, {
+          title: response.data.result.TITLE,
+          contactId: response.data.result.CONTACT_ID,
+          stageId: response.data.result.STAGE_ID,
+          amount: response.data.result.OPPORTUNITY,
+        });
+        return response.data.result;
+      } else {
+        console.log("❌ Deal not found");
+        return null;
+      }
+    } catch (error) {
+      console.error("❌ Error getting deal:", error.message);
+      throw error;
+    }
+  }
+
+  async getContactFromDeal(dealId) {
+    try {
+      console.log(`🔍 Getting contact from deal ${dealId}...`);
+      const deal = await this.getDeal(dealId);
+
+      if (deal && deal.CONTACT_ID && deal.CONTACT_ID !== "0") {
+        console.log(`✅ Deal has associated contact: ${deal.CONTACT_ID}`);
+        const contact = await this.getContact(deal.CONTACT_ID);
+        return contact;
+      } else {
+        console.log("❌ Deal has no valid associated contact");
+        return null;
+      }
+    } catch (error) {
+      console.error("❌ Error getting contact from deal:", error.message);
+      return null;
+    }
+  }
+
+  async getContact(contactId) {
+    try {
+      console.log(`🔍 Getting contact ${contactId}...`);
+      const response = await axios.get(`${this.webhookUrl}/crm.contact.get`, {
+        params: { id: contactId },
+      });
+
+      if (response.data.result) {
+        console.log(`✅ Contact obtained:`, {
+          name: `${response.data.result.NAME || ""} ${
+            response.data.result.LAST_NAME || ""
+          }`,
+          email: response.data.result.EMAIL?.[0]?.VALUE || "Not available",
+          phone: response.data.result.PHONE?.[0]?.VALUE || "Not available",
+        });
+      }
+
+      return response.data.result;
+    } catch (error) {
+      console.error("❌ Error getting contact:", error.message);
+      throw error;
+    }
+  }
+
+  // 🔹 NUEVO MÉTODO: Obtener productos del deal
+  async getDealProducts(dealId) {
+    try {
+      console.log(`🛒 Getting products for deal ${dealId}...`);
+      
+      const response = await axios.get(`${this.productWebhookUrl}/crm.deal.productrows.get`, {
+        params: { 
+          id: dealId
+        }
+      });
+
+      if (response.data && response.data.result) {
+        const products = response.data.result;
+        console.log(`✅ Found ${products.length} products for deal ${dealId}:`, 
+          products.map(p => ({
+            id: p.PRODUCT_ID,
+            name: p.PRODUCT_NAME || 'Sin nombre',
+            price: p.PRICE,
+            quantity: p.QUANTITY,
+            total: p.PRICE * p.QUANTITY
+          }))
+        );
+        
+        return products;
+      } else {
+        console.log(`📭 No products found for deal ${dealId}`);
+        return [];
+      }
+    } catch (error) {
+      console.error("❌ Error getting deal products:", error.message);
+      return [];
+    }
+  }
+
+  // 🔹 MÉTODO MEJORADO: Obtener deal con productos
+  async getDealWithProducts(dealId) {
+    try {
+      console.log(`🔍 Getting deal ${dealId} with products...`);
+      const [deal, products] = await Promise.all([
+        this.getDeal(dealId),
+        this.getDealProducts(dealId)
+      ]);
+
+      if (deal) {
+        deal.PRODUCTS = products;
+        deal.PRODUCTS_SUMMARY = this.formatProductsSummary(products);
+      }
+
+      return deal;
+    } catch (error) {
+      console.error("❌ Error getting deal with products:", error.message);
+      return null;
+    }
+  }
+
+  // 🔹 Formatear resumen de productos para mostrar/email
+  formatProductsSummary(products) {
+    if (!products || products.length === 0) {
+      return "Services";
+    }
+
+    // Si hay solo un producto, devolver su nombre
+    if (products.length === 1) {
+      const product = products[0];
+      return product.PRODUCT_NAME || "Product";
+    }
+
+    // Si hay múltiples productos, crear un resumen
+    const productNames = products
+      .map(p => p.PRODUCT_NAME)
+      .filter(name => name && name.trim() !== "");
+    
+    if (productNames.length === 0) return "Multiple products";
+    
+    if (productNames.length === 1) return productNames[0];
+    
+    if (productNames.length <= 3) {
+      return productNames.join(", ");
+    }
+    
+    return `${productNames[0]} and ${productNames.length - 1} more products`;
+  }
+
+  async updateDeal(dealId, data) {
+    try {
+      console.log(`🔄 Updating deal ${dealId}...`);
+      const response = await axios.post(`${this.webhookUrl}/crm.deal.update`, {
+        id: dealId,
+        fields: data,
+      });
+      console.log(`✅ Deal updated successfully`);
+      return response.data.result;
+    } catch (error) {
+      console.error("❌ Error updating deal:", error.message);
+      throw error;
+    }
+  }
+}
+
+// =====================================
 // AUTHORIZE.NET SERVICE CLASS
 // =====================================
 class AuthorizeNetService {
@@ -89,9 +267,7 @@ class AuthorizeNetService {
 
     console.log("🚨 VERIFICACIÓN AUTHORIZE.NET CONFIGURACIÓN:", {
       environment: this.useSandbox ? "SANDBOX" : "PRODUCCIÓN",
-      apiLoginId: this.apiLoginId
-        ? `PRESENTE (${this.apiLoginId.substring(0, 4)}...)`
-        : "FALTANTE",
+      apiLoginId: this.apiLoginId ? "PRESENTE" : "FALTANTE",
       transactionKey: this.transactionKey ? "PRESENTE" : "FALTANTE",
       baseUrl: this.getBaseUrl(),
       tokenBaseUrl: this.useSandbox
@@ -126,14 +302,26 @@ class AuthorizeNetService {
     try {
       console.log("🔄 Creando transacción en Authorize.Net...");
 
-      // 🔹 Determinar descripción según contexto
+      // 🔹 Determinar descripción según productos
       let description;
-      if (paymentData.isEmailFlow) {
-        // Para flujo de email: usar nombre del cliente
+      if (paymentData.products && paymentData.products.length > 0) {
+        const productNames = paymentData.products
+          .map(p => p.PRODUCT_NAME)
+          .filter(name => name)
+          .slice(0, 2);
+        description = productNames.length > 0 
+          ? `Payment for: ${productNames.join(', ')}${paymentData.products.length > 2 ? '...' : ''}`
+          : `Payment for ${paymentData.customerName}`;
+      } else if (paymentData.isEmailFlow) {
         description = `Payment for ${paymentData.customerName}`;
       } else {
-        // Para otros flujos: descripción genérica
         description = `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+      }
+
+      // Limitar longitud de descripción
+      const MAX_DESC_LENGTH = 255;
+      if (description.length > MAX_DESC_LENGTH) {
+        description = description.substring(0, MAX_DESC_LENGTH - 3) + '...';
       }
 
       const payload = {
@@ -185,16 +373,8 @@ class AuthorizeNetService {
 
       console.log("📤 Sending request to Authorize.Net:", {
         url: `${this.getBaseUrl()}/xml/v1/request.api`,
-        payload: {
-          ...payload,
-          createTransactionRequest: {
-            ...payload.createTransactionRequest,
-            merchantAuthentication: {
-              name: "***",
-              transactionKey: "***",
-            },
-          },
-        },
+        invoiceNumber: payload.createTransactionRequest.transactionRequest.order.invoiceNumber,
+        description: description,
       });
 
       const response = await axios.post(
@@ -261,18 +441,31 @@ class AuthorizeNetService {
         entity: `${paymentData.entityType}-${paymentData.entityId}`,
         description: paymentData.description || null,
         isEmailFlow: paymentData.isEmailFlow || false,
+        productsCount: paymentData.products?.length || 0,
       });
 
-      // 🔹 Determinar descripción según contexto
+      // 🔹 Determinar descripción según productos
       let description;
-      if (paymentData.isEmailFlow) {
-        // Para flujo de email: usar nombre del cliente
+      if (paymentData.products && paymentData.products.length > 0) {
+        const productNames = paymentData.products
+          .map(p => p.PRODUCT_NAME)
+          .filter(name => name)
+          .slice(0, 2);
+        description = productNames.length > 0 
+          ? `Payment for: ${productNames.join(', ')}${paymentData.products.length > 2 ? '...' : ''}`
+          : `Payment for ${paymentData.customerName}`;
+      } else if (paymentData.isEmailFlow) {
         description = `Payment for ${paymentData.customerName}`;
+      } else if (paymentData.description && paymentData.description.trim().length > 0) {
+        description = paymentData.description.trim();
       } else {
-        // Para otros flujos: descripción genérica o personalizada
-        description = paymentData.description && paymentData.description.trim().length > 0
-          ? paymentData.description.trim()
-          : `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+        description = `Payment for ${paymentData.entityType} ${paymentData.entityId}`;
+      }
+
+      // Limitar longitud de descripción
+      const MAX_DESC_LENGTH = 255;
+      if (description.length > MAX_DESC_LENGTH) {
+        description = description.substring(0, MAX_DESC_LENGTH - 3) + '...';
       }
 
       const tokenPayload = {
@@ -407,100 +600,6 @@ class AuthorizeNetService {
   }
 }
 
-// =====================================
-// BITRIX24 CLASS
-// =====================================
-class Bitrix24 {
-  constructor() {
-    this.webhookUrl =
-      process.env.BITRIX24_WEBHOOK_URL ||
-      "https://ensurityexpress.bitrix24.com/rest/65/v6hyou7s4l7fpj5l";
-  }
-
-  async getDeal(dealId) {
-    try {
-      console.log(`🔍 Getting deal ${dealId}...`);
-      const response = await axios.get(`${this.webhookUrl}/crm.deal.get`, {
-        params: { id: dealId },
-      });
-
-      if (response.data.result) {
-        console.log(`✅ Deal obtained:`, {
-          title: response.data.result.TITLE,
-          contactId: response.data.result.CONTACT_ID,
-          stageId: response.data.result.STAGE_ID,
-          amount: response.data.result.OPPORTUNITY,
-        });
-        return response.data.result;
-      } else {
-        console.log("❌ Deal not found");
-        return null;
-      }
-    } catch (error) {
-      console.error("❌ Error getting deal:", error.message);
-      throw error;
-    }
-  }
-
-  async getContactFromDeal(dealId) {
-    try {
-      console.log(`🔍 Getting contact from deal ${dealId}...`);
-      const deal = await this.getDeal(dealId);
-
-      if (deal && deal.CONTACT_ID && deal.CONTACT_ID !== "0") {
-        console.log(`✅ Deal has associated contact: ${deal.CONTACT_ID}`);
-        const contact = await this.getContact(deal.CONTACT_ID);
-        return contact;
-      } else {
-        console.log("❌ Deal has no valid associated contact");
-        return null;
-      }
-    } catch (error) {
-      console.error("❌ Error getting contact from deal:", error.message);
-      return null;
-    }
-  }
-
-  async getContact(contactId) {
-    try {
-      console.log(`🔍 Getting contact ${contactId}...`);
-      const response = await axios.get(`${this.webhookUrl}/crm.contact.get`, {
-        params: { id: contactId },
-      });
-
-      if (response.data.result) {
-        console.log(`✅ Contact obtained:`, {
-          name: `${response.data.result.NAME || ""} ${
-            response.data.result.LAST_NAME || ""
-          }`,
-          email: response.data.result.EMAIL?.[0]?.VALUE || "Not available",
-          phone: response.data.result.PHONE?.[0]?.VALUE || "Not available",
-        });
-      }
-
-      return response.data.result;
-    } catch (error) {
-      console.error("❌ Error getting contact:", error.message);
-      throw error;
-    }
-  }
-
-  async updateDeal(dealId, data) {
-    try {
-      console.log(`🔄 Updating deal ${dealId}...`);
-      const response = await axios.post(`${this.webhookUrl}/crm.deal.update`, {
-        id: dealId,
-        fields: data,
-      });
-      console.log(`✅ Deal updated successfully`);
-      return response.data.result;
-    } catch (error) {
-      console.error("❌ Error updating deal:", error.message);
-      throw error;
-    }
-  }
-}
-
 // Initialize services
 const authorizeService = new AuthorizeNetService();
 const bitrix24 = new Bitrix24();
@@ -518,32 +617,84 @@ async function sendPaymentEmail(
   clientName,
   paymentLink,
   dealId,
-  amount = null
+  amount = null,
+  products = null
 ) {
   try {
     // Get the deal amount if not provided
     let dealAmount = amount;
-    if (!dealAmount && dealId) {
+    let productsSummary = "Services";
+    let productsList = [];
+    
+    if (dealId) {
       try {
-        const deal = await bitrix24.getDeal(dealId);
-        dealAmount = deal?.OPPORTUNITY || "20.80";
+        // 🔹 OBTENER PRODUCTOS SI NO VIENEN EN PARÁMETRO
+        if (!products) {
+          const dealProducts = await bitrix24.getDealProducts(dealId);
+          products = dealProducts;
+        }
+        
+        // 🔹 OBTENER INFO DEL DEAL SI NO HAY MONTO
+        if (!dealAmount) {
+          const deal = await bitrix24.getDeal(dealId);
+          dealAmount = deal?.OPPORTUNITY || "20.80";
+        }
+        
+        // 🔹 FORMATEAR RESUMEN DE PRODUCTOS
+        if (products && products.length > 0) {
+          productsSummary = bitrix24.formatProductsSummary(products);
+          productsList = products.map(p => ({
+            name: p.PRODUCT_NAME || 'Product',
+            quantity: p.QUANTITY || 1,
+            price: p.PRICE || 0,
+            total: (p.PRICE || 0) * (p.QUANTITY || 1)
+          }));
+        }
       } catch (error) {
-        console.error("Error getting deal amount:", error);
+        console.error("Error getting deal info:", error);
         dealAmount = "20.80";
       }
     } else if (!dealAmount) {
       dealAmount = "20.80";
     }
 
-    // 🔹 Generar invoice number para mostrar en email
+    // 🔹 Generar invoice number
     const invoiceNumber = authorizeService.buildInvoiceNumber(dealId);
 
+    // 🔹 CONSTRUIR HTML CON PRODUCTOS
+    let productsHtml = '';
+    if (productsList.length > 0) {
+      productsHtml = `
+        <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+          <h3 style="color: #af100a; margin-bottom: 10px; font-size: 16px;">📦 Products/Services:</h3>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <thead>
+              <tr style="background: #e9ecef;">
+                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #dee2e6;">Description</th>
+                <th style="padding: 8px; text-align: right; border-bottom: 2px solid #dee2e6;">Qty</th>
+                <th style="padding: 8px; text-align: right; border-bottom: 2px solid #dee2e6;">Price</th>
+                <th style="padding: 8px; text-align: right; border-bottom: 2px solid #dee2e6;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${productsList.map(product => `
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #dee2e6;">${product.name}</td>
+                  <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6;">${product.quantity}</td>
+                  <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6;">$${product.price.toFixed(2)}</td>
+                  <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6;">$${product.total.toFixed(2)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     const mailOptions = {
-      from: `"Ensurity Express Payments" <${
-        process.env.SMTP_USER || "invoice@ensurityexpress.com"
-      }>`,
+      from: `"Ensurity Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
       to: email,
-      subject: `Payment Invoice from Ensurity Express - Customer: ${clientName}`,
+      subject: `Payment Invoice from Ensurity Express - ${productsSummary}`,
       html: `
 <!DOCTYPE html>
 <html>
@@ -560,6 +711,8 @@ async function sendPaymentEmail(
         .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #666; text-align: center; }
         .amount-info { background: #f8f9fa; padding: 15px; border-radius: 6px; margin: 15px 0; border-left: 4px solid #af100a; }
         .brand { font-weight: 700; color: #af100a; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -570,13 +723,16 @@ async function sendPaymentEmail(
 
     <div class="content">
         <p>Hello <strong>${clientName}</strong>,</p>
-        <p>You have received a secure payment link to complete your transaction with <span class="brand">Ensurity Express</span>.</p>
-
+        <p>You have received a payment invoice for:</p>
+        
         <div class="amount-info">
-            <p><strong>Invoice Number:</strong> ${invoiceNumber}</p>
+            <h3 style="margin-top: 0; color: #af100a;">Invoice #${invoiceNumber}</h3>
             <p><strong>Customer:</strong> ${clientName}</p>
-            <p><strong>Amount:</strong> <strong>$${dealAmount} USD</strong></p>
+            <p><strong>Description:</strong> ${productsSummary}</p>
+            <p><strong>Total Amount:</strong> <strong style="font-size: 18px;">$${dealAmount} USD</strong></p>
         </div>
+
+        ${productsHtml}
 
         <p>To complete your payment, click the button below:</p>
 
@@ -595,11 +751,11 @@ async function sendPaymentEmail(
 
         <p>If you have any questions, please contact us.</p>
         <p style="text-align: center;">
-Ensurity Express Tax Solutions<br>
-935 W RALPH HALL PKWY 101<br>
-ROCKWALL TX, 75032<br>
-469-4847873<br>
-</p>
+          Ensurity Express Tax Solutions<br>
+          935 W RALPH HALL PKY 101<br>
+          ROCKWALL TX, 75032<br>
+          469-4847873<br>
+        </p>
     </div>
 
     <div class="footer">
@@ -612,7 +768,7 @@ ROCKWALL TX, 75032<br>
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`✅ Email sent to: ${email} with invoice: ${invoiceNumber}`);
+    console.log(`✅ Email sent to: ${email} for: ${productsSummary}`);
     return info;
   } catch (error) {
     console.error("❌ Error sending email:", error);
@@ -623,9 +779,7 @@ ROCKWALL TX, 75032<br>
 async function sendPaymentConfirmation(email, paymentData) {
   try {
     const mailOptions = {
-      from: `"Ensurity Express Payments" <${
-        process.env.SMTP_USER || "invoice@ensurityexpress.com"
-      }>`,
+      from: `"Ensurity Express Payments" <${process.env.SMTP_USER || "invoice@ensurityexpress.com"}>`,
       to: email,
       subject: `✅ Payment Confirmation - ${paymentData.transactionId}`,
       html: `
@@ -656,9 +810,7 @@ async function sendPaymentConfirmation(email, paymentData) {
             <p><strong>Invoice Number:</strong> ${paymentData.invoiceNumber || 'N/A'}</p>
             <p><strong>Customer:</strong> ${paymentData.clientName}</p>
             <p><strong>Amount:</strong> $${paymentData.amount}</p>
-            <p><strong>Transaction ID:</strong> ${
-              paymentData.transactionId
-            }</p>
+            <p><strong>Transaction ID:</strong> ${paymentData.transactionId}</p>
             <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
             <p><strong>Time:</strong> ${new Date().toLocaleTimeString()}</p>
         </div>
@@ -739,6 +891,7 @@ app.post("/widget/bitrix24", async (req, res) => {
     let entityType = null;
     let hasValidContact = true;
     let dealAmount = null;
+    let dealProducts = [];
 
     if (PLACEMENT_OPTIONS) {
       let options;
@@ -760,9 +913,11 @@ app.post("/widget/bitrix24", async (req, res) => {
         console.log(`💼 It is a DEAL: ${entityId}`);
         contactData = await bitrix24.getContactFromDeal(entityId);
 
-        const deal = await bitrix24.getDeal(entityId);
+        const deal = await bitrix24.getDealWithProducts(entityId);
         dealAmount = deal?.OPPORTUNITY || "20.80";
+        dealProducts = deal?.PRODUCTS || [];
         console.log(`💰 Deal amount: $${dealAmount}`);
+        console.log(`🛒 Products found: ${dealProducts.length}`);
 
         if (!contactData) {
           hasValidContact = false;
@@ -835,6 +990,28 @@ app.post("/widget/bitrix24", async (req, res) => {
         : "Cliente no disponible";
       const clientPhone = contactData?.PHONE?.[0]?.VALUE || "No disponible";
 
+      // 🔹 CONSTRUIR HTML CON PRODUCTOS
+      let productsHtml = '';
+      if (dealProducts.length > 0) {
+        productsHtml = `
+          <div style="margin: 12px 0; padding: 12px; background: #f0f9ff; border-radius: 6px; border-left: 4px solid #007bff;">
+            <h4 style="margin: 0 0 8px 0; color: #0056b3; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+              📦 Products/Services in this deal:
+            </h4>
+            <ul style="margin: 0; padding-left: 18px; font-size: 12px;">
+              ${dealProducts.slice(0, 3).map(product => `
+                <li style="margin-bottom: 4px;">
+                  <strong>${product.PRODUCT_NAME || 'Product'}</strong> 
+                  - Qty: ${product.QUANTITY || 1} 
+                  - $${product.PRICE || 0} each
+                </li>
+              `).join('')}
+              ${dealProducts.length > 3 ? `<li>... and ${dealProducts.length - 3} more</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+
       widgetHTML = `
 <!DOCTYPE html>
 <html>
@@ -905,6 +1082,7 @@ app.post("/widget/bitrix24", async (req, res) => {
                 `
                     : ""
                 }
+                ${productsHtml}
             </div>
 
             <button class="btn" onclick="generatePaymentLink()">
@@ -930,6 +1108,7 @@ app.post("/widget/bitrix24", async (req, res) => {
         const ENTITY_ID = '${entityId}';
         const ENTITY_TYPE = '${entityType}';
         const DEAL_AMOUNT = '${dealAmount || "20.80"}';
+        const DEAL_PRODUCTS = ${JSON.stringify(dealProducts)};
 
         async function generatePaymentLink() {
             const resultDiv = document.getElementById('result');
@@ -946,7 +1125,8 @@ app.post("/widget/bitrix24", async (req, res) => {
                             ENTITY_TYPE: ENTITY_TYPE,
                             CONTACT_EMAIL: CLIENT_EMAIL,
                             CONTACT_NAME: CLIENT_NAME,
-                            DEAL_AMOUNT: DEAL_AMOUNT
+                            DEAL_AMOUNT: DEAL_AMOUNT,
+                            PRODUCTS: DEAL_PRODUCTS
                         })
                     })
                 });
@@ -992,7 +1172,8 @@ app.post("/widget/bitrix24", async (req, res) => {
                         entityType: ENTITY_TYPE,
                         clientEmail: CLIENT_EMAIL,
                         clientName: CLIENT_NAME,
-                        amount: DEAL_AMOUNT
+                        amount: DEAL_AMOUNT,
+                        products: DEAL_PRODUCTS
                     })
                 });
 
@@ -1006,10 +1187,11 @@ app.post("/widget/bitrix24", async (req, res) => {
                         '<strong>📧 Recipient:</strong> ' + CLIENT_EMAIL + '<br>' +
                         '<strong>👤 Client:</strong> ' + CLIENT_NAME + '<br>' +
                         '<strong>💰 Amount:</strong> $' + DEAL_AMOUNT + ' USD<br>' +
+                        '<strong>📦 Products:</strong> ' + (DEAL_PRODUCTS.length > 0 ? DEAL_PRODUCTS.length + ' products' : 'Not specified') + '<br>' +
                         '<strong>🆔 Reference:</strong> ' + ENTITY_TYPE + '-' + ENTITY_ID +
                         '</div>' +
                         '<div style="margin-top: 10px; padding: 8px; background: #d4edda; border-radius: 5px; font-size: 11px; color: #155724;">' +
-                        '💡 The client received the payment link by email.' +
+                        '💡 The client received the payment link by email with product details.' +
                         '</div>';
                     resultDiv.className = 'result success';
                 } else {
@@ -1045,12 +1227,10 @@ app.post("/widget/bitrix24", async (req, res) => {
         }
 
         function copyToClipboard(text) {
-            // Usando el API moderno de clipboard
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(text).then(() => {
                     alert('✅ Link copied to clipboard!');
                 }).catch(err => {
-                    console.error('Failed to copy: ', err);
                     fallbackCopyToClipboard(text);
                 });
             } else {
@@ -1138,6 +1318,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
     const contactEmail = options.CONTACT_EMAIL;
     const contactName = options.CONTACT_NAME;
     const dealAmount = options.DEAL_AMOUNT;
+    const products = options.PRODUCTS || [];
 
     if (!entityId) {
       return res.status(400).json({
@@ -1153,6 +1334,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
       contactEmail,
       contactName,
       dealAmount: dealAmount || null,
+      products: products,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "direct_link",
@@ -1161,7 +1343,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
 
     paymentTokens.set(token, tokenData);
     console.log(
-      `✅ Token generated for ${entityType} ${entityId} - Flow: Direct Link`
+      `✅ Token generated for ${entityType} ${entityId} - Products: ${products.length}`
     );
 
     const paymentLink = `${BASE_URL}/payment/${token}`;
@@ -1172,6 +1354,7 @@ app.post("/webhook/bitrix24", async (req, res) => {
       entityId: entityId,
       entityType: entityType,
       contactEmail: contactEmail,
+      productsCount: products.length,
       flowType: "direct_link",
       message:
         "Payment link generated successfully - Client can modify amount",
@@ -1238,7 +1421,7 @@ app.get("/payment/:token", async (req, res) => {
                 p { color: #6c757d; margin-bottom: 20px; line-height: 1.6; }
             </style>
         </head>
-        <body>
+<body>
             <div class="container">
                 <div class="error-icon">⏰</div>
                 <h1>Expired link</h1>
@@ -1251,7 +1434,7 @@ app.get("/payment/:token", async (req, res) => {
     }
 
     console.log(
-      `✅ Token valid for: ${tokenData.contactName} (${tokenData.contactEmail}) - Flow: ${tokenData.flowType}, isEmailFlow: ${tokenData.isEmailFlow}`
+      `✅ Token valid for: ${tokenData.contactName} (${tokenData.contactEmail}) - Products: ${tokenData.products?.length || 0}`
     );
 
     // Amount to be used in the HPP (email, widget, web, etc.)
@@ -1484,7 +1667,7 @@ app.post("/api/send-payment-email", async (req, res) => {
   console.log("📧 PAYMENT EMAIL SUBMISSION REQUEST");
 
   try {
-    const { entityId, entityType, clientEmail, clientName, amount } = req.body;
+    const { entityId, entityType, clientEmail, clientName, amount, products } = req.body;
 
     if (!entityId || !clientEmail) {
       return res.status(400).json({
@@ -1494,13 +1677,14 @@ app.post("/api/send-payment-email", async (req, res) => {
     }
 
     let dealAmount = amount;
-    if (!dealAmount) {
+    let dealProducts = products || [];
+    
+    if (dealProducts.length === 0) {
       try {
-        const deal = await bitrix24.getDeal(entityId);
-        dealAmount = deal?.OPPORTUNITY || "20.80";
+        dealProducts = await bitrix24.getDealProducts(entityId);
       } catch (error) {
-        console.error("Error getting deal amount:", error);
-        dealAmount = "20.80";
+        console.error("Error getting products:", error);
+        dealProducts = [];
       }
     }
 
@@ -1511,6 +1695,7 @@ app.post("/api/send-payment-email", async (req, res) => {
       contactEmail: clientEmail,
       contactName: clientName,
       dealAmount: dealAmount,
+      products: dealProducts,
       timestamp: Date.now(),
       expires: Date.now() + 24 * 60 * 60 * 1000,
       flowType: "email",
@@ -1518,7 +1703,6 @@ app.post("/api/send-payment-email", async (req, res) => {
     };
 
     paymentTokens.set(token, tokenData);
-
     const paymentLink = `${BASE_URL}/payment/${token}`;
 
     await sendPaymentEmail(
@@ -1526,16 +1710,18 @@ app.post("/api/send-payment-email", async (req, res) => {
       clientName,
       paymentLink,
       entityId,
-      dealAmount
+      dealAmount,
+      dealProducts
     );
 
     res.json({
       success: true,
-      message: "Email sent successfully with fixed amount",
+      message: "Email sent successfully with products",
       clientEmail: clientEmail,
       clientName: clientName,
       entityId: entityId,
       amount: dealAmount,
+      productsCount: dealProducts.length,
       flowType: "email",
       invoiceNumber: authorizeService.buildInvoiceNumber(entityId),
     });
@@ -1574,7 +1760,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       });
     }
 
-    if (!amount || parseFloat(amount) <= 0) {
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
       return res.status(400).json({
         success: false,
         error: "Invalid amount. Must be greater than 0",
@@ -1586,6 +1772,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       email: tokenData.contactEmail,
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`,
+      products: tokenData.products?.length || 0,
       flowType: tokenData.flowType,
       isEmailFlow: tokenData.isEmailFlow || false,
     });
@@ -1596,6 +1783,7 @@ app.post("/api/generate-authorize-link", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
+      products: tokenData.products || [],
       isEmailFlow: tokenData.isEmailFlow || false,
     });
 
@@ -1657,6 +1845,7 @@ app.post("/api/process-payment", async (req, res) => {
       email: tokenData.contactEmail,
       amount: amount,
       entity: `${tokenData.entityType}-${tokenData.entityId}`,
+      products: tokenData.products?.length || 0,
       isEmailFlow: tokenData.isEmailFlow || false,
     });
 
@@ -1669,6 +1858,7 @@ app.post("/api/process-payment", async (req, res) => {
       customerEmail: tokenData.contactEmail,
       entityId: tokenData.entityId,
       entityType: tokenData.entityType,
+      products: tokenData.products || [],
       isEmailFlow: tokenData.isEmailFlow || false,
     });
 
@@ -1695,6 +1885,7 @@ app.post("/api/process-payment", async (req, res) => {
         UF_CRM_REFERENCE_ID: authResult.referenceId,
         UF_CRM_PAYMENT_PROCESSOR: "Authorize.Net",
         UF_CRM_INVOICE_NUMBER: authResult.invoiceNumber,
+        UF_CRM_PRODUCTS_COUNT: tokenData.products?.length || 0,
       });
       console.log(`✅ Bitrix24 updated for deal ${tokenData.entityId}`);
     } catch (bitrixError) {
@@ -1811,6 +2002,7 @@ app.get("/authorize/return", async (req, res) => {
               UF_CRM_TRANSACTION_ID: transactionId,
               UF_CRM_PAYMENT_PROCESSOR: "Authorize.Net",
               UF_CRM_PAYMENT_FLOW: tokenData.flowType || "unknown",
+              UF_CRM_PRODUCTS_COUNT: tokenData.products?.length || 0,
             });
             console.log(
               `✅ Bitrix24 updated for deal ${tokenData.entityId}`
@@ -2139,6 +2331,7 @@ app.get("/health", (req, res) => {
     token: k.substring(0, 10) + "...",
     entity: `${v.entityType}-${v.entityId}`,
     email: v.contactEmail,
+    products: v.products?.length || 0,
     flowType: v.flowType || "unknown",
     isEmailFlow: v.isEmailFlow || false,
     amount: v.dealAmount || "N/A",
@@ -2148,11 +2341,16 @@ app.get("/health", (req, res) => {
 
   res.json({
     status: "OK",
-    server: "Ensurity Express Payments v1.0",
+    server: "Ensurity Express Payments v1.1",
     timestamp: new Date().toISOString(),
     baseUrl: BASE_URL,
     websiteUrl: WEBSITE_URL,
     invoiceFormat: "EX000XL00TX (Siempre)",
+    features: {
+      bitrix24Products: "✓ Enabled",
+      authorizeInvoiceDescription: "✓ Product-based",
+      emailProductsDisplay: "✓ Enabled"
+    },
     endpoints: {
       widget: "POST /widget/bitrix24",
       webhook: "POST /webhook/bitrix24",
@@ -2172,9 +2370,6 @@ app.get("/health", (req, res) => {
       baseUrl: authorizeService.getBaseUrl(),
       hasApiLoginId: !!authorizeService.apiLoginId,
       hasTransactionKey: !!authorizeService.transactionKey,
-      apiLoginId: authorizeService.apiLoginId
-        ? `${authorizeService.apiLoginId.substring(0, 4)}...`
-        : "Not configured",
     },
     sessions: {
       active: paymentTokens.size,
@@ -2198,7 +2393,7 @@ app.post("/api/debug-hpp-production", async (req, res) => {
       getHostedPaymentPageRequest: {
         merchantAuthentication: {
           name: process.env.AUTHORIZE_API_LOGIN_ID,
-          transactionKey: process.env.AUTHORIZE_TRACTION_KEY,
+          transactionKey: process.env.AUTHORIZE_TRANSACTION_KEY,
         },
         transactionRequest: {
           transactionType: "authCaptureTransaction",
@@ -2258,7 +2453,6 @@ app.post("/api/debug-hpp-production", async (req, res) => {
   }
 });
 
-
 // =====================================
 // Ruta GET para testing del widget
 // =====================================
@@ -2314,12 +2508,18 @@ app.get("/widget/bitrix24", (req, res) => {
 app.get("/", (req, res) => {
   res.json({
     message: "Ensurity Express Payments API",
-    version: "1.0",
+    version: "1.1",
     status: "running",
     baseUrl: BASE_URL,
     websiteUrl: WEBSITE_URL,
     invoiceFormat: "EX000XL00TX (Siempre)",
-    descriptionBehavior: "Email flow: Client Name, Others: Generic",
+    descriptionBehavior: "Product-based descriptions",
+    features: [
+      "Bitrix24 integration with product display",
+      "Authorize.Net Hosted Payment Pages",
+      "Email invoicing with product details",
+      "Secure token-based payment links"
+    ],
     endpoints: {
       health: "/health",
       widget: "/widget/bitrix24",
@@ -2372,4 +2572,5 @@ app.listen(PORT, () => {
     }`
   );
   console.log(`📄 Invoice Format: EX000XL00TX (Siempre)`);
+  console.log(`🛒 Product Integration: ✓ ENABLED`);
 });
