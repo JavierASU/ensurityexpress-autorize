@@ -15,7 +15,7 @@ const app = express();
 // CONFIGURACIÓN DE URL DESDE .ENV
 // =========================
 const BASE_URL =
-  process.env.BASE_URL || "https://kqgavtfrpt.us-east-1.awsapprunner.com";
+  process.env.BASE_URL || "https://invoice.ensurityexpress.com";
 const WEBSITE_URL = "https://ensurityexpress.com";
 
 console.log(`🔗 URL Base configurada: ${BASE_URL}`);
